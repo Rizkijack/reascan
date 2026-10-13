@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>reascan — web stack &amp; JS bundle analysis</title>
+  <meta name="description" content="Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle inventory, confidence with explicit limitations and unknowns." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">reascan</a>
+    <span class="tagline">evidence, not scores</span>
+  </header>
+
+  <main>
+    <section class="panel" aria-labelledby="form-heading">
+      <h1 id="form-heading">Analyze a URL</h1>
+      <form id="analyze-form" novalidate>
+        <label for="target-url" class="sr-only">Target URL</label>
+        <div class="form-row">
+          <input
+            id="target-url"
+            name="url"
+            type="url"
+            inputmode="url"
+            placeholder="https://example.com"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          />
+          <button type="submit" id="analyze-btn">Analyze</button>
+        </div>
+
+        <fieldset class="categories">
+          <legend>Categories</legend>
+          <label><input type="checkbox" name="category" value="fingerprint" checked /> Fingerprint</label>
+          <label><input type="checkbox" name="category" value="jsBundle" checked /> JS Bundles</label>
+        </fieldset>
+      </form>
+      <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+    </section>
+
+    <section id="history-section" class="panel" aria-labelledby="history-heading" hidden>
+      <h2 id="history-heading">History <button type="button" id="clear-history" class="link-btn">clear</button></h2>
+      <ul id="history-list" class="history"></ul>
+    </section>
+
+    <section id="results" class="panel" aria-labelledby="results-heading" hidden>
+      <h2 id="results-heading">Findings</h2>
+      <div id="verdict" class="verdict"></div>
+      <div id="findings-body"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      Every fetch to your target is guarded against private-network addresses at two layers.
+      Secret-pattern detection is intentionally not performed — this report never displays secret values.
+    </p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

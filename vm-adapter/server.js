@@ -179,8 +179,13 @@ export function createAdapter(env) {
 // Windows, where the drive letter and backslashes do not match.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT) || 8787;
+  // Loopback by default, deliberately. The architecture assumes the adapter has no
+  // inbound port at all — Cloudflare Tunnel dials out to it. listen(port) with no
+  // host binds "::", which would expose the adapter on every interface and leave
+  // the API key as the only thing between the internet and the analysis engine.
+  const host = process.env.HOST || '127.0.0.1';
   const server = createAdapter(process.env);
-  server.listen(port, () => {
-    process.stderr.write(`reascan adapter listening on :${port}\n`);
+  server.listen(port, host, () => {
+    process.stderr.write(`reascan adapter listening on ${host}:${port}\n`);
   });
 }

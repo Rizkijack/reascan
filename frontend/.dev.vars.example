@@ -1,0 +1,9 @@
+# Local dev vars for `wrangler pages dev` — copy to .dev.vars (gitignored).
+# Production values live in the Pages dashboard (Settings → Environment variables).
+
+# Tunnel hostname of the VM adapter, e.g. https://reascan-vm.example.com
+# (quick tunnel: https://<random>.trycloudflare.com — see docs/vm-setup.md §5)
+VM_ADAPTER_URL=http://localhost:8787
+
+# Must match the API_KEY in vm-adapter/.env — same string, both sides.
+API_KEY=change-me

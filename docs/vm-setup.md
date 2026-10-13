@@ -5,10 +5,11 @@ Guide for the AI agent operating the VM. Installs the analysis engine (adapter +
 **Runtime:** Node 20+ or Bun (either works — adapter is zero-dependency, Node built-ins only).
 **No Docker.** Two systemd services: `reascan-adapter` (analysis engine) + `reascan-tunnel` (cloudflared).
 
-> **Status: belum dijalankan.** Panduan ini ditulis lebih dulu dari `install.sh`-nya, jadi
-> langkah-langkahnya belum pernah dieksekusi di VM sungguhan. Yang sudah terverifikasi baru
-> adapter lokal: `node server.js` → `/health` 200 dengan key yang benar, 401 tanpa key,
-> 422 untuk URL privat. `bash install.sh` belum ada di repo — itu langkah 5 yang tersisa.
+> **Status: belum dijalankan di VM sungguhan.** `install.sh` sudah ada di repo dan
+> mengikuti langkah di bawah ini, tapi belum pernah dieksekusi di VM. Yang sudah
+> terverifikasi: adapter lokal (`node server.js` → `/health` 200 dengan key yang benar,
+> 401 tanpa key, 422 untuk URL privat). Jalankan `bash install.sh` sebagai langkah VM
+> pertama (bagian dari tahap deploy — PLAN.md langkah 8).
 
 ---
 
@@ -43,12 +44,14 @@ bash install.sh
 ```
 
 `install.sh` does:
-1. Copies `.env.example` → `.env` (never overwrites an existing `.env`)
+1. Copies `.env.example` → `.env` (never overwrites an existing `.env`; generates a random API_KEY on first run)
 2. Installs `cloudflared` if missing (official release binary → `/usr/local/bin`)
 3. Writes + enables systemd units:
    - `reascan-adapter` — `node server.js` (WorkingDirectory = repo vm-adapter/, EnvironmentFile = .env)
-   - `reascan-tunnel` — `cloudflared tunnel --url http://localhost:8787`
+   - `reascan-tunnel` — `cloudflared tunnel --url http://localhost:$PORT` (port read from .env, default 8787)
 4. Starts both services with `Restart=always`
+
+Must run as root (`sudo bash install.sh`) — it writes to `/usr/local/bin` and `/etc/systemd/system`.
 
 ## 4. Configure secrets
 

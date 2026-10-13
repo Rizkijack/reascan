@@ -1,6 +1,6 @@
 # REA Web Platform — Technical Design
 
-**Versi:** 1.1 — kontrak modul diperbarui setelah implementasi langkah 1–4
+**Versi:** 1.2 — langkah 1–6 terimplementasi (engine, server, install tooling, frontend + Pages Functions)
 **Tanggal:** 2026-10-13
 **Status:** Blueprint untuk build. Complement PLAN.md (plan + arsitektur + fase). Dokumen ini = spec teknis: komponen, struktur kode, API contract, flow.
 **Keputusan frontend:** static, single page, vanilla HTML/CSS/JS — nol framework, nol build step.
@@ -378,18 +378,23 @@ reascan/                       # repo root (publik, MIT)
 ├── .gitignore                     # .env, node_modules, dist, *.log, .dev.vars
 │
 ├── frontend/                  # Cloudflare Pages project (SATU deploy unit — no-conflict)
-│   ├── index.html             # 1 halaman: form + results panel          [BELUM]
-│   ├── style.css              # tema Vercel dark (~100 baris)             [BELUM]
-│   ├── app.js                 # fetch + render + states + localStorage   [BELUM]
-│   ├── .dev.vars.example      # VM_ADAPTER_URL + API_KEY                  [BELUM]
+│   ├── index.html             # 1 halaman: form + results panel          ✅
+│   ├── style.css              # tema Vercel dark (~100 baris)             ✅
+│   ├── app.js                 # fetch + render + states + localStorage   ✅
+│   ├── package.json           # type: module (ESM untuk node --test)     ✅
+│   ├── .dev.vars.example      # VM_ADAPTER_URL + API_KEY                  ✅
+│   ├── test/
+│   │   └── analyze.test.js    # guard tests (offline, DI resolver)       ✅
 │   └── functions/             # Pages Functions (Workers runtime, auto-route /api/*)
 │       └── api/
-│           ├── analyze.js     # handler + SSRF guard inline             [BELUM]
-│           └── health.js      # GET /api/health (MVP, ~5 baris)         [BELUM]
+│           ├── analyze.js     # handler + SSRF guard inline             ✅
+│           └── health.js      # GET /api/health (MVP, ~15 baris)         ✅
 │   # fase 2 tambah: api/status.js, api/result.js
+│   # CATATAN: test TIDAK di functions/ — Pages meng-compile semua file di
+│   # sana jadi Worker route, dan import node:test akan merusak deploy.
 │
 ├── vm-adapter/                # Node service (dijalankan di VM via systemd)
-│   ├── install.sh             # VM one-command                         [BELUM]
+│   ├── install.sh             # VM one-command (systemd + cloudflared)  ✅
 │   ├── package.json           # type: module, zero deps, node --test   ✅
 │   ├── server.js              # HTTP server: /analyze, /health          ✅
 │   ├── modules/
@@ -401,24 +406,30 @@ reascan/                       # repo root (publik, MIT)
 │   │   ├── urlGuard.js        # denylist + DNS + redirect-hop + TLS     ✅
 │   │   ├── urlGuard.test.js                                           ✅
 │   │   ├── body.js            # bounded response reads                 ✅
-│   │   └── reaMcp.js          # REA MCP client (fase 2 stub)           [BELUM]
+│   │   └── reaMcp.js          # REA MCP client (fase 2 stub)           ✅
 │   ├── server.test.js         # auth/routing/error mapping              ✅
-│   └── .env.example           # API_KEY, PORT                          [BELUM]
+│   └── .env.example           # API_KEY, PORT                          ✅
 │
 └── docs/
     └── vm-setup.md            # panduan install untuk AI agent di VM
 ```
 
-**Kondisi saat ini:** `vm-adapter/` lengkap untuk langkah 1–4 (engine + server, 60 test hijau),
-verified jalan lokal via `node server.js`. Yang belum: `install.sh`, `reaMcp.js`, `.env.example`,
-dan seluruh `frontend/`. Belum ada deploy, belum ada tunnel, belum ada Pages project.
+**Kondisi saat ini:** langkah 1–6 lengkap — `vm-adapter/` (engine + server + install.sh,
+63 test hijau, verified jalan lokal via `node server.js`) dan `frontend/` (page + Pages
+Functions, 8 test hijau untuk edge guard). Belum ada deploy, belum ada tunnel, belum ada
+Pages project. `install.sh` dan frontend belum pernah dieksekusi end-to-end di VM/Cloudflare
+sungguhan — itu bagian audit (langkah 7) dan deploy (langkah 8).
 
 `lib/body.js` tidak ada di tree asli — ditambahkan saat implementasi karena `fingerprint.js`
 dan `jsBundle.js` masing-masing membawa salinan `readCapped`.
 
-**Jumlah file MVP:** 10 file `vm-adapter/` sudah ada, 6 di antaranya test. Sisa yang harus dibuat: `install.sh`, `lib/reaMcp.js`, `.env.example`, dan 5 file `frontend/` — total 18 file saat selesai. Nol framework, nol build step, nol Docker.
+**Jumlah file MVP:** 18 file total saat selesai — 11 di `vm-adapter/` (5 test), 7 di
+`frontend/` (1 test + package.json). Nol framework, nol build step, nol Docker.
 
-Estimasi "~17 file" di revisi sebelumnya meleset karena file test tidak ikut dihitung.
+`frontend/test/` (bukan `frontend/functions/api/*.test.js`) karena Pages Functions
+meng-compile setiap file di `functions/` jadi Worker route — file yang meng-import
+`node:test` di sana akan merusak deploy. Deviasi disengaja dari konvensi "test
+sebelahan modul" (AGENTS.md).
 
 **Fallback Vercel (DARURAT saja — nol file di repo):** kalau Cloudflare 100% gagal → frontend statis host di Vercel + copy handler ke konvensi `api/` (Serverless Functions) + env vars dashboard. Tidak ada `vercel.json` di MVP — single deploy path = nol file yang harus di-sync manual.
 
@@ -539,22 +550,30 @@ Aturan shape: setiap finding = {key, value, type, evidence, confidence}. Type �
 - [x] `vm-adapter/modules/jsBundle.js` + test — script inventory + endpoint/obfuscation
 - [x] `vm-adapter/server.js` + `server.test.js` — auth, routing, deadline, verdict
 
-**Belum:**
-- [ ] `vm-adapter/install.sh` — systemd services (adapter + cloudflared)
-- [ ] `vm-adapter/lib/reaMcp.js` — stub fase 2
-- [ ] `vm-adapter/.env.example`
-- [ ] `frontend/index.html`, `style.css`, `app.js`, `.dev.vars.example`
-- [ ] `frontend/functions/api/analyze.js` (handler + SSRF guard, export `validateUrl`)
-- [ ] `frontend/functions/api/health.js`
+- [x] `vm-adapter/install.sh` — systemd services (adapter + cloudflared)
+- [x] `vm-adapter/lib/reaMcp.js` — stub fase 2
+- [x] `vm-adapter/.env.example`
+- [x] `frontend/index.html`, `style.css`, `app.js`, `.dev.vars.example`
+- [x] `frontend/functions/api/analyze.js` (handler + SSRF guard, export `validateUrl`)
+- [x] `frontend/functions/api/health.js`
 - [ ] Audit menyeluruh seluruh tree
 - [ ] Deploy Cloudflare Pages + tunnel VM
 
-**Test:** 60 passing di `vm-adapter/`. SSRF guard diuji offline (denylist, IPv4-mapped,
-IPv4-compatible, encoding alternatif, redirect ke metadata) plus verifikasi live lewat
-httpbin. `server.test.js` terakhir memakai jaringan sungguhan.
+**Test:** 63 passing di `vm-adapter/` + 8 passing di `frontend/`. SSRF guard adapter
+diuji offline (denylist, IPv4-mapped, IPv4-compatible, encoding alternatif, redirect ke
+metadata) plus verifikasi live lewat httpbin; `server.test.js` terakhir memakai jaringan
+sungguhan. Edge guard (`frontend/test/analyze.test.js`) full offline — DNS di-inject
+sebagai fake resolver (DI seam).
 
 **Verified:** adapter jalan lokal (`node server.js` → `/health` 200 dengan key, 401 tanpa
-key, 422 untuk URL privat). **Belum pernah** diinstall di VM sungguhan.
+key, 422 untuk URL privat). **Belum pernah** diinstall di VM sungguhan; `install.sh` dan
+frontend belum dieksekusi end-to-end.
+
+**Catatan edge guard:** Workers `node:dns` hanya mengimplementasikan `resolve4`/`resolve6`
+— `lookup` melempar "Not implemented" — jadi `analyze.js` sengaja memakai `resolve4/6`,
+bukan `lookup` seperti adapter. Denylist ada di DUA tempat (`analyze.js` + `urlGuard.js`);
+test `the edge denylist matches the adapter denylist` mengunci keduanya agar tidak
+drift.
 
 ---
 

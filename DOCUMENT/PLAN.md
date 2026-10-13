@@ -1,6 +1,6 @@
 # REA Web Platform — Technical Plan
 
-**Versi:** 1.3 — Fase 1 halfway: engine + server selesai, deploy belum
+**Versi:** 1.4 — Fase 1: 6/8 langkah, engine + server + install tooling + frontend selesai, deploy belum
 **Tanggal:** 2026-10-13
 **Konsep:** Website lite + online REA. Website = layer output/tampilan. VM = engine analisa (skill REA utuh). User paste URL → diproses di VM → hasil ditampilkan sebagai data terstruktur.
 **Keputusan deploy:** Cloudflare free tier (Pages + Workers + D1 + R2 + Tunnel). VM sudah ada (existing). Biaya Cloudflare: $0.
@@ -272,15 +272,15 @@ Query D1 dari Workers: `env.DB.prepare(...).bind(...).run()`. JSON parse di Work
 
 ### Fase 1 — MVP (~1 minggu)
 
-**Status: 4 dari 8 langkah selesai. Engine + server lengkap dan teruji, belum ada deploy.**
+**Status: 6 dari 8 langkah selesai. Engine + server + install tooling + frontend lengkap dan teruji, belum ada deploy.**
 
 - [x] VM: modul `urlGuard.js` (denylist, DNS resolve, redirect-hop, TLS probe) + test
 - [x] VM: modul `fingerprint.js` (headers/TLS/framework/CDN) + test
 - [x] VM: modul `jsBundle.js` (script inventory, endpoint, obfuscation) + test
 - [x] VM: `server.js` (`/analyze`, `/health`, auth, deadline, verdict) + test
-- [ ] VM: `install.sh` + systemd services (adapter + cloudflared), `reaMcp.js` stub, `.env.example`
-- [ ] Pages: `index.html`, `style.css`, `app.js` (form + report + history localStorage)
-- [ ] Pages Functions: `analyze.js` (SSRF guard layer 1) + `health.js`
+- [x] VM: `install.sh` + systemd services (adapter + cloudflared), `reaMcp.js` stub, `.env.example`
+- [x] Pages: `index.html`, `style.css`, `app.js` (form + report + history localStorage)
+- [x] Pages Functions: `analyze.js` (SSRF guard layer 1) + `health.js`
 - [ ] Audit menyeluruh seluruh tree, lalu deploy (Pages + tunnel)
 
 **Deliverable:** user paste URL → dapat report tech stack + JS findings + verdict (standar evidence REA) dalam hitungan detik. Biaya Cloudflare: $0.

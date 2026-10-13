@@ -57,12 +57,15 @@ reascan/
 │   ├── index.html           # the page: form + results panel
 │   ├── style.css            # Vercel-dark theme, vanilla
 │   ├── app.js               # fetch + render + localStorage history
+│   ├── package.json         # type: module (ESM for node --test)
 │   ├── .dev.vars.example    # local dev vars (VM_ADAPTER_URL, API_KEY)
+│   ├── test/                # guard tests (outside functions/ on purpose)
+│   │   └── analyze.test.js  # validateUrl offline tests
 │   └── functions/api/       # Pages Functions (auto-routed /api/*)
 │       ├── analyze.js       # handler + SSRF guard (validateUrl exported for tests)
 │       └── health.js        # GET /api/health
 ├── vm-adapter/              # Node service — runs on the VM
-│   ├── install.sh           # one-command VM install                  [not built]
+│   ├── install.sh           # one-command VM install (systemd + cloudflared)
 │   ├── package.json         # type: module, zero deps, node --test
 │   ├── server.js            # POST /analyze, GET /health
 │   ├── modules/
@@ -71,20 +74,18 @@ reascan/
 │   ├── lib/
 │   │   ├── urlGuard.js      # denylist + DNS + redirect-hop validation
 │   │   ├── body.js          # bounded response reads
-│   │   └── reaMcp.js        # REA MCP client (phase 2 stub)          [not built]
-│   └── .env.example                                                [not built]
+│   │   └── reaMcp.js        # REA MCP client (phase 2 stub)
+│   └── .env.example         # API_KEY, PORT template
 ├── README.md
 ├── LICENSE                  # MIT
 └── .gitignore
 ```
 
-Frontend (`frontend/`) has not been built yet; see the status table below.
-
 Zero framework. Zero build step. Zero dependencies (Node built-ins only).
 
 ## Development status
 
-Fase 1, 4 of 8 steps done. The analysis engine is complete and tested. Nothing is deployed.
+Fase 1, 6 of 8 steps done. Engine, server, install tooling, and the full frontend (page + Pages Functions) are built and tested. Nothing is deployed.
 
 | # | Step | State |
 |---|---|---|
@@ -92,14 +93,14 @@ Fase 1, 4 of 8 steps done. The analysis engine is complete and tested. Nothing i
 | 2 | `modules/fingerprint.js` | done, tested |
 | 3 | `modules/jsBundle.js` | done, tested |
 | 4 | `server.js` + verdict aggregation | done, tested |
-| 5 | `install.sh`, `reaMcp.js`, `.env.example` | not built |
-| 6 | `frontend/` + Pages Functions | not built |
+| 5 | `install.sh`, `reaMcp.js`, `.env.example` | done, tested |
+| 6 | `frontend/` + Pages Functions | done, tested |
 | 7 | Whole-tree audit | not started |
 | 8 | Deploy (Pages + Tunnel) | not started |
 
-`node --test` inside `vm-adapter/` — **60 passing**. The last three server tests reach the real network; everything else runs offline.
+`node --test` — **63 passing** inside `vm-adapter/` (the last three server tests reach the real network; everything else runs offline) and **8 passing** inside `frontend/` (guard tests, fully offline via an injected DNS resolver).
 
-The adapter has been verified running locally but has never been installed on a VM. No tunnel, no Pages project, nothing live.
+The adapter has been verified running locally but has never been installed on a VM. `install.sh` and the frontend are written to spec but unexercised end-to-end: no tunnel, no Pages project, nothing live.
 
 ## MVP scope
 
