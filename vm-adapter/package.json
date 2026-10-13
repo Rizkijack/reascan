@@ -1,0 +1,14 @@
+{
+  "name": "reascan-vm-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "reascan analysis engine — runs on the VM, reached via Cloudflare Tunnel",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node server.js"
+  }
+}
