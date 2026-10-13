@@ -1,6 +1,6 @@
 # REA Web Platform — Technical Plan
 
-**Versi:** 1.1 — deployment final: Cloudflare FREE tier
+**Versi:** 1.2 — AGENTS.md ditambahkan; git convention fix ke `main`
 **Tanggal:** 2026-10-13
 **Konsep:** Website lite + online REA. Website = layer output/tampilan. VM = engine analisa (skill REA utuh). User paste URL → diproses di VM → hasil ditampilkan sebagai data terstruktur.
 **Keputusan deploy:** Cloudflare free tier (Pages + Workers + D1 + R2 + Tunnel). VM sudah ada (existing). Biaya Cloudflare: $0.
@@ -315,7 +315,7 @@ Query D1 dari Workers: `env.DB.prepare(...).bind(...).run()`. JSON parse di Work
 8. ~~Deploy VM~~ — nol Docker: `install.sh` → systemd services (adapter + cloudflared)
 9. ~~Fallback hosting~~ — Vercel hanya darurat kalau Cloudflare 100% gagal; nol file di repo (single deploy path)
 10. ~~License~~ — MIT (repo publik)
-11. ~~Agent configs (opencode/openagent/kilocode)~~ — skip: tooling mesin, bukan bagian proyek
+11. ~~Agent configs (opencode/openagent/kilocode)~~ — skip: tooling mesin, bukan bagian proyek ~~→ dibalik 2026-10-13~~ — `AGENTS.md` dibuat di repo root. Alasan: convention git (selalu commit + push ke `main`) dan security invariant `urlGuard` harus stick di luar chat; agent cuma baca kalau filenya ada. Isinya instruksi saja, nol tooling/config
 12. ~~Test e2e~~ — curl ke URL nyata (apapun yang aktif saat testing)
 
 **Masih terbuka (fase 2, tidak block MVP):**
