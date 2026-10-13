@@ -8,6 +8,7 @@
 
 import { isIPv4, isIPv6 } from 'node:net';
 import { lookup } from 'node:dns/promises';
+import { connect as tlsConnect } from 'node:tls';
 
 export const DENYLIST_CIDRS = [
   '127.0.0.0/8', // loopback
@@ -150,10 +151,19 @@ export async function validateUrl(rawUrl) {
   }
 
   // URL keeps IPv6 literals bracketed ("[::1]"); dns.lookup wants them bare.
-  const hostname = url.hostname.startsWith('[') && url.hostname.endsWith(']')
+  const host = url.hostname.startsWith('[') && url.hostname.endsWith(']')
     ? url.hostname.slice(1, -1)
     : url.hostname;
 
+  const resolved = await resolvePublic(host);
+  if (!resolved.ok) return resolved;
+
+  return { ok: true, url };
+}
+
+// Resolve and refuse the host unless every answer is public. Shared by the HTTP
+// path and the TLS path so both legs apply identical rules.
+export async function resolvePublic(hostname) {
   let addresses;
   try {
     addresses = await lookup(hostname, { all: true });
@@ -165,15 +175,72 @@ export async function validateUrl(rawUrl) {
     return { ok: false, reason: `dns returned no address: ${hostname}` };
   }
 
-  // Every resolved address must be public. One private answer among several is
-  // enough to refuse the whole host.
+  // One private answer among several is enough to refuse the whole host.
   for (const { address } of addresses) {
     if (isDeniedIp(address)) {
       return { ok: false, reason: `url blocked: resolves to private IP ${address}` };
     }
   }
 
-  return { ok: true, url };
+  return { ok: true, addresses };
+}
+
+// A raw TLS socket is outbound traffic too, so it goes through here rather than
+// being opened by the caller. Connecting to the already-checked address (not the
+// hostname) also closes the rebinding race for this leg: the address we validated
+// is the address we dial.
+//
+// rejectUnauthorized is off on purpose — this reads the presented certificate for
+// reporting and is not authenticating anything.
+export async function safeTlsInfo(hostname, port = 443, { timeoutMs = 10000 } = {}) {
+  const publicHost = hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1)
+    : hostname;
+  const resolved = await resolvePublic(publicHost);
+  if (!resolved.ok) return resolved;
+
+  const address = resolved.addresses[0].address;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket?.destroy();
+      resolve(value);
+    };
+
+    let socket;
+    try {
+      socket = tlsConnect({
+        host: address,
+        port,
+        servername: publicHost,
+        rejectUnauthorized: false,
+      });
+    } catch (err) {
+      resolve({ ok: false, reason: `tls connect failed: ${err.message}` });
+      return;
+    }
+
+    const timer = setTimeout(() => finish({ ok: false, reason: `tls timeout after ${timeoutMs}ms` }), timeoutMs);
+
+    socket.once('error', (err) => finish({ ok: false, reason: `tls error: ${err.message}` }));
+    socket.once('secureConnect', () => {
+      const cert = socket.getPeerCertificate(false) || {};
+      finish({
+        ok: true,
+        tls: {
+          issuer: cert.issuer?.O ?? cert.issuer?.CN ?? null,
+          subject: cert.subject?.CN ?? null,
+          expiry: cert.valid_to ?? null,
+          validFrom: cert.valid_from ?? null,
+          protocol: socket.getProtocol?.() ?? null,
+        },
+      });
+    });
+  });
 }
 
 export async function safeFetch(rawUrl, { timeoutMs = 10000, maxRedirects = 3 } = {}) {
