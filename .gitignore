@@ -1,0 +1,21 @@
+# secrets / env
+.env
+.dev.vars
+.wrangler/
+
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.log
+npm-debug.log*
+
+# os
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+*.swp
