@@ -384,7 +384,8 @@ reascan/                       # repo root (publik, MIT)
 │   ├── package.json           # type: module (ESM untuk node --test)     ✅
 │   ├── .dev.vars.example      # VM_ADAPTER_URL + API_KEY                  ✅
 │   ├── test/
-│   │   └── analyze.test.js    # guard tests (offline, DI resolver)       ✅
+│   │   ├── analyze.test.js    # guard tests (offline, DI resolver)       ✅
+│   │   └── proxy.test.js      # onRequestPost round-trip vs fake engine  ✅
 │   └── functions/             # Pages Functions (Workers runtime, auto-route /api/*)
 │       └── api/
 │           ├── analyze.js     # handler + SSRF guard inline             ✅
@@ -408,7 +409,7 @@ reascan/                       # repo root (publik, MIT)
 │   │   ├── body.js            # bounded response reads                 ✅
 │   │   └── reaMcp.js          # REA MCP client (fase 2 stub)           ✅
 │   ├── server.test.js         # auth/routing/error mapping              ✅
-│   └── .env.example           # API_KEY, PORT                          ✅
+│   └── .env.example           # API_KEY, PORT, HOST                    ✅
 │
 └── docs/
     └── vm-setup.md            # panduan install untuk AI agent di VM
@@ -556,14 +557,24 @@ Aturan shape: setiap finding = {key, value, type, evidence, confidence}. Type �
 - [x] `frontend/index.html`, `style.css`, `app.js`, `.dev.vars.example`
 - [x] `frontend/functions/api/analyze.js` (handler + SSRF guard, export `validateUrl`)
 - [x] `frontend/functions/api/health.js`
+- [x] `frontend/test/proxy.test.js` — round-trip proxy tests (audit pass)
 - [ ] Audit menyeluruh seluruh tree
 - [ ] Deploy Cloudflare Pages + tunnel VM
 
-**Test:** 63 passing di `vm-adapter/` + 8 passing di `frontend/`. SSRF guard adapter
+**Test:** 63 passing di `vm-adapter/` + 17 passing di `frontend/`. SSRF guard adapter
 diuji offline (denylist, IPv4-mapped, IPv4-compatible, encoding alternatif, redirect ke
 metadata) plus verifikasi live lewat httpbin; `server.test.js` terakhir memakai jaringan
 sungguhan. Edge guard (`frontend/test/analyze.test.js`) full offline — DNS di-inject
-sebagai fake resolver (DI seam).
+sebagai fake resolver (DI seam); `frontend/test/proxy.test.js` menjalankan `onRequestPost`
+sungguhan terhadap adapter palsu lokal (key forwarding, pass-through findings, mapping
+status, body rusak).
+
+**Mapping error edge (keputusan audit):** `analyze.js` TIDAK meneruskan status engine apa
+adanya. Kontrak publik §5 hanya mengizinkan 200/422/502, jadi 422 engine tetap 422
+("blocked") dan sisanya → 502 dengan teks alasan engine dipertahankan. Tanpa itu, 401 dari
+adapter (key mismatch) akan sampai ke browser sebagai prompt autentikasi, dan 504
+memperlebar kontrak. Test `engine failures map onto the documented public statuses`
+mengunci perilaku ini.
 
 **Verified:** adapter jalan lokal (`node server.js` → `/health` 200 dengan key, 401 tanpa
 key, 422 untuk URL privat). **Belum pernah** diinstall di VM sungguhan; `install.sh` dan

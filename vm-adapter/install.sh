@@ -26,10 +26,30 @@ command -v node >/dev/null 2>&1 || die "node not found — install Node 20+ firs
 
 # --- 1. .env ---------------------------------------------------------------
 if [ ! -f "$ADAPTER_DIR/.env" ]; then
+  [ -f "$ADAPTER_DIR/.env.example" ] \
+    || die ".env.example is missing from $ADAPTER_DIR — cannot create .env. Restore it from the repo."
+
   API_KEY="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")"
-  sed "s/^API_KEY=$/API_KEY=$API_KEY/" "$ADAPTER_DIR/.env.example" > "$ADAPTER_DIR/.env"
+
+  # Matches the line whatever it holds, not only the empty form. Substituting
+  # just the empty case meant a placeholder like API_KEY=change-me shipped as
+  # the live key without a word of complaint.
+  sed "s|^API_KEY=.*|API_KEY=$API_KEY|" "$ADAPTER_DIR/.env.example" > "$ADAPTER_DIR/.env.tmp"
+
+  # The shell creates the file before sed reads anything, so a failed sed leaves
+  # a 0-byte .env behind. The next run sees that file, decides .env is already
+  # configured, and skips regeneration — stranding the install with no way out
+  # but a manual rm.
+  if ! grep -q "^API_KEY=..*" "$ADAPTER_DIR/.env.tmp"; then
+    rm -f "$ADAPTER_DIR/.env.tmp"
+    die "failed to write API_KEY into .env — check that .env.example has an API_KEY line."
+  fi
+
+  mv "$ADAPTER_DIR/.env.tmp" "$ADAPTER_DIR/.env"
   chmod 600 "$ADAPTER_DIR/.env"
-  log ".env created with a generated API_KEY — copy it to the Pages dashboard secret"
+  log ".env created with a generated API_KEY"
+  log "  API_KEY = $API_KEY"
+  log "  Set the same value in Cloudflare Pages -> Settings -> Environment variables -> Add secret."
 else
   log ".env exists — leaving it untouched"
 fi
@@ -47,9 +67,17 @@ if ! command -v cloudflared >/dev/null 2>&1; then
     *) die "unsupported architecture: $(uname -m)" ;;
   esac
   log "installing cloudflared ($CF_ARCH)"
+  # Downloaded to a temp path first. Writing straight to /usr/local/bin means an
+  # interrupted transfer leaves a truncated binary that the next chmod +x happily
+  # makes executable, and the first tunnel run then fails cryptically.
+  CF_TMP="$(mktemp)"
+  trap 'rm -f "$CF_TMP"' EXIT
   curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$CF_ARCH" \
-    -o /usr/local/bin/cloudflared
-  chmod +x /usr/local/bin/cloudflared
+    -o "$CF_TMP"
+  [ -s "$CF_TMP" ] || die "cloudflared download produced an empty file"
+  install -m 0755 "$CF_TMP" /usr/local/bin/cloudflared
+  rm -f "$CF_TMP"
+  trap - EXIT
 else
   log "cloudflared already installed — leaving it untouched"
 fi
@@ -99,3 +127,12 @@ systemctl enable --now reascan-adapter reascan-tunnel
 log "done. verify:"
 log "  curl http://localhost:$PORT/health -H \"X-API-Key: <from vm-adapter/.env>\""
 log "  journalctl -u reascan-tunnel -f   # quick-tunnel URL is printed there"
+
+# A quick tunnel gets a brand new hostname every time the unit restarts, and
+# Restart=always guarantees it will. Whatever VM_ADAPTER_URL points at in Pages
+# goes stale at that moment and every analysis starts returning 502, with nothing
+# in the adapter logs to explain it.
+log ""
+log "WARNING: this unit uses a QUICK tunnel, so its hostname changes on every"
+log "         restart. Update VM_ADAPTER_URL in Pages each time, or move to a"
+log "         named tunnel before relying on it - see docs/vm-setup.md 5."

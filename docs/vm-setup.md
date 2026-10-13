@@ -109,7 +109,7 @@ curl -X POST https://reascan.pages.dev/api/analyze \
 | Symptom | Cause | Fix |
 |---|---|---|
 | `connection refused` on /health | adapter not running | `sudo systemctl status reascan-adapter`; `journalctl -u reascan-adapter -f` |
-| 502 "analysis engine unreachable" from Pages | `VM_ADAPTER_URL` wrong or tunnel down | check `systemctl status reascan-tunnel`; re-copy hostname to Pages env var |
+| 502 "analysis engine unreachable" from Pages | `VM_ADAPTER_URL` wrong, tunnel down, or a quick-tunnel hostname went stale | check `systemctl status reascan-tunnel`; `install.sh` warns that a QUICK tunnel gets a new hostname on every restart — re-copy it, or switch to a named tunnel (§5) |
 | 401/403 from adapter | API_KEY mismatch | `.env` on VM ≠ Pages secret — rotate both to the same value |
 | Adapter returns 422 "url blocked" | SSRF guard working correctly — target resolves to a private IP | expected behavior; test with a public URL |
 | Analysis times out | target site slow/dead, or bundle fetch hitting the 10s cap | check `verdict.limitations` in the response — failures are reported, not hidden |

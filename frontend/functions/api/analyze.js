@@ -265,14 +265,27 @@ export async function onRequestPost(context) {
     return json(502, { status: 'error', error: 'analysis engine unreachable' });
   }
 
-  // Adapter failures pass through with their own status (504 deadline, 422
-  // blocked at layer 2, ...) — the caller sees what actually happened instead
-  // of everything collapsing into a generic 502.
-  if (!engine.ok || result.status !== 'ok') {
-    return json(engine.status, {
+  // Public contract (DESIGN §5) defines exactly three statuses for this route:
+  // 200, 422, 502. The engine's own code is therefore NOT echoed back — a 401
+  // (adapter key mismatch) would advertise an auth prompt to the browser, and a
+  // 504 (deadline) is an engine-internal condition. A 422 keeps its meaning
+  // ("blocked"), anything else is "the engine did not give you findings" — a
+  // 502 — with the engine's reason preserved verbatim in the body.
+  if (!engine.ok) {
+    const status = engine.status === 422 ? 422 : 502;
+    return json(status, {
       status: 'error',
-      error: result?.error ?? `analysis engine returned ${engine.status}`,
+      error: result?.error ?? `analysis engine failed (${engine.status})`,
     });
+  }
+
+  // A 2xx that is not {status:'ok'} is a contract breach, not a success. Echoing
+  // it back as 200 would put {status:'error'} under a success code and break
+  // "200 means done" for every client; result may also be null or a non-object
+  // (adapter returned `null`), which must land as JSON here rather than as a
+  // TypeError turning into a 500 HTML page.
+  if (result?.status !== 'ok' || typeof result.findings !== 'object' || result.findings === null) {
+    return json(502, { status: 'error', error: 'analysis engine returned an unexpected response' });
   }
 
   return json(200, { status: 'done', findings: result.findings });
