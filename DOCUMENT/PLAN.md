@@ -1,6 +1,6 @@
 # REA Web Platform — Technical Plan
 
-**Versi:** 1.2 — AGENTS.md ditambahkan; git convention fix ke `main`
+**Versi:** 1.3 — Fase 1 halfway: engine + server selesai, deploy belum
 **Tanggal:** 2026-10-13
 **Konsep:** Website lite + online REA. Website = layer output/tampilan. VM = engine analisa (skill REA utuh). User paste URL → diproses di VM → hasil ditampilkan sebagai data terstruktur.
 **Keputusan deploy:** Cloudflare free tier (Pages + Workers + D1 + R2 + Tunnel). VM sudah ada (existing). Biaya Cloudflare: $0.
@@ -206,6 +206,8 @@ Catatan: Workers/Pages Function IP dinamis → IP allowlist tidak relevan. Secur
 
 **Layer 3 — Adapter (semua fetch ke target):** adapter punya guard sendiri (`lib/urlGuard.js`): re-validasi URL awal + redirect-hop validation (`redirect: 'manual'`, max 3 hop, tiap hop resolve DNS + cek denylist). Node fetch follow redirect otomatis → tanpa guard ini target jahat bisa 302 ke `169.254.169.254` (cloud metadata). Worker boleh compromised, adapter tetap menolak.
 
+**Implementasi Layer 3 (selesai, teruji):** guard menolak IPv4-mapped (`::ffff:a.b.c.d`) dan IPv4-compatible (`::a.b.c.d`) setelah di-unmap — tanpa itu `http://[::127.0.0.1]/` lolos. `tls.connect()` juga lewat `safeTlsInfo` di dalam `urlGuard` (raw socket tidak boleh dibuka modul pemanggil) dan dial ke IP yang sudah dicek dengan SNI tetap hostname — kaki TLS race rebinding-nya tertutup. Risiko tersisa ada di kaki HTTP: `validateUrl` resolve sekali, `fetch()` resolve lagi; menutupnya butuh IP pinning yang mengubah kontrak `validateUrl` di DESIGN §3.6.
+
 ---
 
 ## 8. DB Schema (D1 / SQLite) — FASE 2
@@ -269,10 +271,17 @@ Query D1 dari Workers: `env.DB.prepare(...).bind(...).run()`. JSON parse di Work
 ## 11. MVP Scope & Phases
 
 ### Fase 1 — MVP (~1 minggu)
-- Pages: paste form + report page (sync) + history localStorage (frontend/functions/ = satu deploy unit)
-- Pages Functions: submit + SSRF guard + forward via tunnel (pure proxy, nol DB)
-- VM: cloudflared + adapter HTTP wrapper (systemd services via install.sh) + modul (fingerprint + JS bundle + urlGuard redirect-hop validation)
-- Deploy: Cloudflare free tier (Pages + Tunnel) + VM existing — langkah detail DESIGN §10
+
+**Status: 4 dari 8 langkah selesai. Engine + server lengkap dan teruji, belum ada deploy.**
+
+- [x] VM: modul `urlGuard.js` (denylist, DNS resolve, redirect-hop, TLS probe) + test
+- [x] VM: modul `fingerprint.js` (headers/TLS/framework/CDN) + test
+- [x] VM: modul `jsBundle.js` (script inventory, endpoint, obfuscation) + test
+- [x] VM: `server.js` (`/analyze`, `/health`, auth, deadline, verdict) + test
+- [ ] VM: `install.sh` + systemd services (adapter + cloudflared), `reaMcp.js` stub, `.env.example`
+- [ ] Pages: `index.html`, `style.css`, `app.js` (form + report + history localStorage)
+- [ ] Pages Functions: `analyze.js` (SSRF guard layer 1) + `health.js`
+- [ ] Audit menyeluruh seluruh tree, lalu deploy (Pages + tunnel)
 
 **Deliverable:** user paste URL → dapat report tech stack + JS findings + verdict (standar evidence REA) dalam hitungan detik. Biaya Cloudflare: $0.
 

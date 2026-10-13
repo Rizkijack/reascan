@@ -1,6 +1,6 @@
 # REA Web Platform — Technical Design
 
-**Versi:** 1.0
+**Versi:** 1.1 — kontrak modul diperbarui setelah implementasi langkah 1–4
 **Tanggal:** 2026-10-13
 **Status:** Blueprint untuk build. Complement PLAN.md (plan + arsitektur + fase). Dokumen ini = spec teknis: komponen, struktur kode, API contract, flow.
 **Keputusan frontend:** static, single page, vanilla HTML/CSS/JS — nol framework, nol build step.
@@ -156,78 +156,174 @@ Semua modul **ESM** (`"type": "module"`), **zero dependency** (Node built-ins sa
 ### `vm-adapter/lib/urlGuard.js` — security core
 
 ```js
-// Pure function — unit testable tanpa network
+// Murni — unit testable tanpa network
 export function ipInCidr(ip, cidr) → boolean
 export const DENYLIST_CIDRS = [
   '127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16',
   '169.254.0.0/16', '0.0.0.0/8', '::1/128', 'fc00::/7'
 ]
+export function isDeniedIp(ip) → boolean
 
-// Validasi URL awal: parse → scheme http/https → DNS resolve → cek IP hasil resolve
-export async function validateUrl(rawUrl) → 
+// Validasi URL awal: parse → scheme http/https → DNS resolve → cek SEMUA IP hasil resolve
+export async function validateUrl(rawUrl) →
   { ok: true, url: URL } | { ok: false, reason: string }
+
+// Resolve + cek dipakai validateUrl DAN safeTlsInfo supaya kaki HTTP dan kaki TLS
+// menerapkan aturan identik
+export async function resolvePublic(hostname) →
+  { ok: true, addresses: [{address, family}] } | { ok: false, reason: string }
 
 // Fetch dengan redirect-hop validation:
 // redirect:'manual' + loop max 3 hop; SETIAP hop: Location → validateUrl → follow atau tolak
 // timeout default 10s (AbortController)
 export async function safeFetch(url, { timeoutMs = 10000, maxRedirects = 3 } = {}) →
   { ok: true, response: Response, finalUrl: string } |
-  { ok: false, reason: string }   // reason → masuk limitations di caller
+  { ok: false, reason: string }
+
+// Probe sertifikat. WAJIB lewat sini: tls.connect() adalah raw socket, kalau
+// dibuka langsung oleh modul pemanggil itu bypass guard. Dial ke IP yang SUDAH
+// dicek dengan SNI tetap hostname — sekaligus menutup race rebinding di kaki TLS.
+// rejectUnauthorized: false disengaja (baca sertifikat untuk laporan, bukan auth).
+export async function safeTlsInfo(hostname, port = 443, { timeoutMs = 10000 } = {}) →
+  { ok: true, tls: { issuer, subject, expiry, validFrom, protocol } } |
+  { ok: false, reason: string }
 ```
+
+**Tambahan terhadap spesifikasi awal (implementasi):**
+- `isDeniedIp` di-export agar logika denylist bisa diuji offline tanpa DNS.
+- IPv4-mapped (`::ffff:a.b.c.d`) DAN IPv4-compatible (`::a.b.c.d`, RFC 4291 deprecated)
+  keduanya di-unmap lalu dicek. Kalau tidak, `http://[::127.0.0.1]/` lolos.
+- `safeTlsInfo` + `resolvePublic` ditambahkan karena `tls.connect()` adalah raw socket
+  yang tidak bisa lewat `safeFetch`.
+- **Risiko tersisa:** TOCTOU DNS rebinding di kaki HTTP — `validateUrl` resolve sekali,
+  `fetch()` resolve lagi pas buka socket. Menutupnya butuh IP pinning yang mengubah
+  kontrak `validateUrl`. Kaki TLS sudah tertutup (dial ke IP terverifikasi).
+
+### `vm-adapter/lib/body.js` — bounded reads (tambahan saat implementasi)
+
+```js
+export async function readCapped(response, maxBytes) →
+  { text: string, bytes: number, truncated: boolean }
+```
+
+Target adalah input tak dipercaya. `response.text()` tanpa batas membiarkan server
+meny_push body sebesar yang dia mau ke heap adapter. `bytes` melaporkan yang benar-benar
+**disimpan**, bukan yang datang — pemanggil yang menampilkan ini sebagai ukuran tidak
+boleh mengklaim 1MB yang hanya dibaca 1KB-nya.
 
 ### `vm-adapter/modules/fingerprint.js`
 
 ```js
-// safeFetch di-inject (dependency injection — test bisa pakai mock)
-export async function fingerprint(url, safeFetch) →
+// safeFetch di-inject (dependency injection — test pakai mock). probeTls opsional
+// supaya test offline; default-nya safeTlsInfo sehingga call 2-arg tetap jalan.
+export async function fingerprint(url, safeFetch, probeTls = safeTlsInfo) →
 {
   findings: Finding[],   // tiap temuan: {key, value, type, evidence, confidence}
   cdn: string | null,
-  tls: { issuer: string, expiry: string } | null
+  tls: { issuer, subject, expiry, validFrom, protocol } | null,
+  limitations: string[]  // LIHAT CATATAN DEVIASI
 }
 
 Deteksi:
 - server       ← header Server          → observation, confidence high
-- framework    ← X-Powered-By + HTML markers (__NEXT_DATA__, ng-, wp-, laravel, /_next/)
-               → derivation, confidence medium
-- cdn          ← cf-ray, x-amz-cf-id, server header
-- tls          ← tls.connect() + getPeerCertificate()
-Kegagalan fetch → {ok:false} dari safeFetch → finding di-skip + limitation ditambah
+- powered_by   ← header X-Powered-By    → observation, confidence high
+- framework    ← X-Powered-By → high; marker markup (__NEXT_DATA__, ng-version=, wp-content,
+                 laravel_session) → medium; nama library di markup (data-v-, data-reactroot) → low
+- cdn          ← cf-ray, x-amz-cf-id, x-served-by, akamai-grn, server header
+- tls          ← safeTlsInfo()
+Kegagalan fetch → {ok:false} dari safeFetch → limitation, bukan finding palsu
 ```
+
+**Deviasi dari §3.6 (disengaja):**
+1. **`limitations` ditambah ke return.** Signature di atas aslinya cuma `{findings, cdn, tls}`,
+   tapi teksnya sendiri sudah menyuruh "kegagalan → limitation ditambah", dan `server.js`
+   butuh `buildVerdict(findings, limitations)`. Tanpa field itu spesifikasi tidak konsisten.
+2. **`probeTls` param ketiga opsional.** Tepat 2 argumen sesuai DESIGN tetap bekerja.
+
+**Confidence mengikuti kekuatan bukti.** `X-Powered-By` = server menyatakan stack-nya sendiri
+(high). Artefak build khusus = marker kuat (medium). Nama library yang muncul di markup —
+`react-dom` muncul di teks error, dokumentasi, dan referensi CDN di situs yang sama sekali
+tidak pakai React — cuma mendukung pembacaan lemah (low). Menaikkannya ke medium membuat
+github.com terbaca sebagai aplikasi React, padahal bukan.
+
+**Body HTML di-cap 512KB.** Marker framework praktis selalu ada di `<head>`. Kalau cap kena,
+itu dilaporkan sebagai limitation: marker di bawahnya memang tidak pernah diperiksa, dan
+tidak diam-diam akan menyajikan scan parsial sebagai scan lengkap.
 
 ### `vm-adapter/modules/jsBundle.js`
 
 ```js
 export async function analyzeBundles(url, safeFetch, limits = {}) →
 {
-  bundles: Bundle[],      // {src, size_kb, sourcemap, endpoints[], obfuscated}
+  bundles: Bundle[],      // lihat shape di bawah
   limitations: string[]   // bundle gagal/timeout/over-limit DICATAT di sini
 }
-// limits default: { maxBundles: 40, maxBytes: 1048576, timeoutMs: 10000 }
+// limits default: { maxBundles: 40, maxBytes: 1048576, timeoutMs: 10000,
+//                   concurrency: 6, maxPageBytes: 4194304 }
+
+Bundle = { src, size_bytes, size_kb, sourcemap, endpoints[], obfuscated, obfuscation_signals[] }
 
 Alur:
 1. safeFetch(url) → parse HTML → extract <script src> (absolute URL, dedupe)
 2. Per bundle: safeFetch → ukuran → cek maxBytes
 3. sourcemap      ← //# sourceMappingURL= comment  → boolean
-4. endpoints      ← regex: /api/, /v1/, /v2/, fetch(, axios. → dedupe → array
-5. obfuscated     ← eval(atob(, eval(function(p,a,c,k,e, signature → boolean (derivation)
+4. endpoints      ← regex path /api/ dan /vN/ di string literal → dedupe → array
+5. obfuscated     ← eval(atob(, signature packer, blob base64 panjang → derivation
 ```
+
+**Tambahan terhadap spesifikasi awal (implementasi):**
+- `concurrency: 6`. 40 fetch berurutan × 10s = 70 detik, melewati budget 60 detik yang
+  diizinkan Pages Function untuk seluruh request.
+- `maxPageBytes`. Dokumen entry juga dikendalikan penyerang; tanpa batas, target bisa
+  menyajikan HTML 500MB.
+- `size_bytes` eksak di samping `size_kb`. `size_kb` bulat 1 desimal = 0.0 di bawah ~50 byte
+  dan tidak bisa menopang klaimnya sendiri.
+- Kegagalan **per bundle** ditangkap. Kalau tidak, satu bundle yang reset socket membuat
+  `Promise.all` reject dan membuang semua bundle yang sukses — kebalikan dari menyajikan
+  inventaris parsial sebagai parsial.
+- Export adalah boundary: target tidak boleh bisa membuat modul ini reject.
+
+**Entropy seluruh bundle DITOLAK.** Bundle minified entropy-nya tinggi secara konstruksi,
+jadi check itu akan menandai hampir setiap situs sungguhan dan tidak memberi informasi apa pun
+ke pembaca. Sinyal obfuscation yang dipakai hanya yang kuat.
 
 ### `vm-adapter/server.js`
 
 ```js
 // http.createServer — nol framework
-// POST /analyze: auth (X-API-Key, timing-safe compare via crypto.timingSafeEqual)
-//   → validateUrl → Promise.all([fingerprint, jsBundle]) → verdict → 200 JSON
-// GET /health → 200 { status: 'ok', tools_available: ['fingerprint', 'jsBundle'] }
-// Error mapping:
-//   401 auth gagal | 422 URL blocked | 502 fetch target gagal | 500 unexpected
+export function createAdapter(env) → http.Server   // test bind ke port 0 (ephemeral)
 
-// verdict (inline di server.js, ~20 baris):
+POST /analyze: auth (X-API-Key, bandingkan panjang dulu lalu crypto.timingSafeEqual)
+  → validateUrl → Promise.all([fingerprint, jsBundle]) → buildVerdict → 200 JSON
+GET /health → 200 { status: 'ok', tools_available: ['fingerprint', 'jsBundle'] }
+
+// Error mapping:
+401 auth gagal | 404 route/method tidak dikenal | 422 URL blocked / body rusak / body kepanjangan
+502 (tidak dipakai — adapter tidak memanggil adapter lain) | 500 tak terduga | 504 lewat deadline
+
+// Auth jalan SEBELUM routing: tidak ada request tanpa key, termasuk /health.
+// API_KEY kosong → 500 "not configured", bukan serve terbuka.
+```
+
+`timingSafeEqual` melempar kalau panjang buffer berbeda, dan throw itu sendiri jadi timing
+oracle. Perbandingan panjang harus mendahuluinya. Ada test untuk key bertingkat panjang
+berbeda — harus 401, bukan crash.
+
+**Deadline 45 detik** untuk keseluruhan request (`REQUEST_TIMEOUT_MS`). Timeout per-fetch
+tidak cukup: 40 bundle ÷ 6 worker × 10s ≈ 70 detik. Caller dapat 504 alih-alih menggantung.
+Work yang sudah jalan dibiarkan (modul tidak menerima sinyal eksternal) dan tetap terbatas
+oleh timeout fetch-nya sendiri.
+
+`buildVerdict(findings, limitations)`:
+```js
 function buildVerdict(findings, limitations) → {
-  confidence: 'high'|'medium'|'low',   // agregasi: semua high → high; ada medium → medium; ada low → low
+  confidence: 'high'|'medium'|'low',   // ambil finding TERLEMAH, bukan rata-rata:
+                                        // satu pembacaan lemah harus membatasi verdict,
+                                        // bukan tenggelam di antara yang kuat.
+                                        // 0 finding → 'low', supaya scan kosong tidak
+                                        // terbaca sebagai "bersih".
   limitations: string[],
-  unknowns: string[]                   // template per kategori (mis. "endpoint auth requirement unknown")
+  unknowns: string[]                   // kondisional pada apa yang benar-benar diamati
 }
 ```
 
@@ -282,33 +378,47 @@ reascan/                       # repo root (publik, MIT)
 ├── .gitignore                     # .env, node_modules, dist, *.log, .dev.vars
 │
 ├── frontend/                  # Cloudflare Pages project (SATU deploy unit — no-conflict)
-│   ├── index.html             # 1 halaman: form + results panel
-│   ├── style.css              # tema Vercel dark (~100 baris)
-│   ├── app.js                 # fetch + render + states + localStorage history
-│   ├── .dev.vars.example      # VM_ADAPTER_URL + API_KEY buat wrangler pages dev lokal
+│   ├── index.html             # 1 halaman: form + results panel          [BELUM]
+│   ├── style.css              # tema Vercel dark (~100 baris)             [BELUM]
+│   ├── app.js                 # fetch + render + states + localStorage   [BELUM]
+│   ├── .dev.vars.example      # VM_ADAPTER_URL + API_KEY                  [BELUM]
 │   └── functions/             # Pages Functions (Workers runtime, auto-route /api/*)
 │       └── api/
-│           ├── analyze.js     # handler + SSRF guard inline (export validateUrl buat test)
-│           └── health.js      # GET /api/health (MVP, ~5 baris)
+│           ├── analyze.js     # handler + SSRF guard inline             [BELUM]
+│           └── health.js      # GET /api/health (MVP, ~5 baris)         [BELUM]
 │   # fase 2 tambah: api/status.js, api/result.js
 │
 ├── vm-adapter/                # Node service (dijalankan di VM via systemd)
-│   ├── install.sh             # VM one-command: node check + systemd services (adapter + cloudflared)
-│   ├── package.json           # type: module, zero deps, scripts.test = node --test
-│   ├── server.js              # HTTP server: /analyze, /health
+│   ├── install.sh             # VM one-command                         [BELUM]
+│   ├── package.json           # type: module, zero deps, node --test   ✅
+│   ├── server.js              # HTTP server: /analyze, /health          ✅
 │   ├── modules/
-│   │   ├── fingerprint.js     # headers/TLS/framework detect
-│   │   └── jsBundle.js        # script inventory + endpoint/obfuscation
+│   │   ├── fingerprint.js     # headers/TLS/framework detect           ✅
+│   │   ├── fingerprint.test.js                                        ✅
+│   │   ├── jsBundle.js        # script inventory + endpoint/obfuscation✅
+│   │   └── jsBundle.test.js                                           ✅
 │   ├── lib/
-│   │   ├── reaMcp.js          # REA MCP client (fase 2 stub)
-│   │   └── urlGuard.js        # denylist + DNS + redirect-hop validation (dipakai semua fetch)
-│   └── .env.example           # API_KEY, PORT
+│   │   ├── urlGuard.js        # denylist + DNS + redirect-hop + TLS     ✅
+│   │   ├── urlGuard.test.js                                           ✅
+│   │   ├── body.js            # bounded response reads                 ✅
+│   │   └── reaMcp.js          # REA MCP client (fase 2 stub)           [BELUM]
+│   ├── server.test.js         # auth/routing/error mapping              ✅
+│   └── .env.example           # API_KEY, PORT                          [BELUM]
 │
 └── docs/
     └── vm-setup.md            # panduan install untuk AI agent di VM
 ```
 
-**Total file kode MVP:** ~17 file. Nol framework, nol build step, nol Docker.
+**Kondisi saat ini:** `vm-adapter/` lengkap untuk langkah 1–4 (engine + server, 60 test hijau),
+verified jalan lokal via `node server.js`. Yang belum: `install.sh`, `reaMcp.js`, `.env.example`,
+dan seluruh `frontend/`. Belum ada deploy, belum ada tunnel, belum ada Pages project.
+
+`lib/body.js` tidak ada di tree asli — ditambahkan saat implementasi karena `fingerprint.js`
+dan `jsBundle.js` masing-masing membawa salinan `readCapped`.
+
+**Jumlah file MVP:** 10 file `vm-adapter/` sudah ada, 6 di antaranya test. Sisa yang harus dibuat: `install.sh`, `lib/reaMcp.js`, `.env.example`, dan 5 file `frontend/` — total 18 file saat selesai. Nol framework, nol build step, nol Docker.
+
+Estimasi "~17 file" di revisi sebelumnya meleset karena file test tidak ikut dihitung.
 
 **Fallback Vercel (DARURAT saja — nol file di repo):** kalau Cloudflare 100% gagal → frontend statis host di Vercel + copy handler ke konvensi `api/` (Serverless Functions) + env vars dashboard. Tidak ada `vercel.json` di MVP — single deploy path = nol file yang harus di-sync manual.
 
@@ -421,12 +531,30 @@ Aturan shape: setiap finding = {key, value, type, evidence, confidence}. Type �
 
 ## 8. Build Checklist
 
-- [ ] `frontend/` — index.html, style.css, app.js, .dev.vars.example + functions/api/analyze.js (handler + SSRF guard, export validateUrl) + functions/api/health.js
-- [ ] `vm-adapter/` — install.sh, package.json, server.js, modules/fingerprint.js, modules/jsBundle.js, lib/urlGuard.js, lib/reaMcp.js (stub), .env.example
-- [ ] repo root — README.md, LICENSE (MIT), .gitignore
-- [ ] `docs/vm-setup.md` — panduan install VM agent (install.sh → systemd)
-- [ ] Test: SSRF guard unit tests (mock URL privat ditolak — security-critical) → adapter standalone (curl /analyze) → wrangler pages dev + curl → e2e curl URL nyata
-- [ ] (setelah selesai) git init + create GitHub repo (publik)
+**Selesai:**
+- [x] `vm-adapter/package.json` — ESM, zero deps, `node --test`
+- [x] `vm-adapter/lib/urlGuard.js` + `urlGuard.test.js` — denylist, DNS resolve, redirect-hop, TLS probe
+- [x] `vm-adapter/lib/body.js` — bounded response reads
+- [x] `vm-adapter/modules/fingerprint.js` + test — headers/TLS/framework/CDN
+- [x] `vm-adapter/modules/jsBundle.js` + test — script inventory + endpoint/obfuscation
+- [x] `vm-adapter/server.js` + `server.test.js` — auth, routing, deadline, verdict
+
+**Belum:**
+- [ ] `vm-adapter/install.sh` — systemd services (adapter + cloudflared)
+- [ ] `vm-adapter/lib/reaMcp.js` — stub fase 2
+- [ ] `vm-adapter/.env.example`
+- [ ] `frontend/index.html`, `style.css`, `app.js`, `.dev.vars.example`
+- [ ] `frontend/functions/api/analyze.js` (handler + SSRF guard, export `validateUrl`)
+- [ ] `frontend/functions/api/health.js`
+- [ ] Audit menyeluruh seluruh tree
+- [ ] Deploy Cloudflare Pages + tunnel VM
+
+**Test:** 60 passing di `vm-adapter/`. SSRF guard diuji offline (denylist, IPv4-mapped,
+IPv4-compatible, encoding alternatif, redirect ke metadata) plus verifikasi live lewat
+httpbin. `server.test.js` terakhir memakai jaringan sungguhan.
+
+**Verified:** adapter jalan lokal (`node server.js` → `/health` 200 dengan key, 401 tanpa
+key, 422 untuk URL privat). **Belum pernah** diinstall di VM sungguhan.
 
 ---
 

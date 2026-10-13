@@ -5,6 +5,11 @@ Guide for the AI agent operating the VM. Installs the analysis engine (adapter +
 **Runtime:** Node 20+ or Bun (either works — adapter is zero-dependency, Node built-ins only).
 **No Docker.** Two systemd services: `reascan-adapter` (analysis engine) + `reascan-tunnel` (cloudflared).
 
+> **Status: belum dijalankan.** Panduan ini ditulis lebih dulu dari `install.sh`-nya, jadi
+> langkah-langkahnya belum pernah dieksekusi di VM sungguhan. Yang sudah terverifikasi baru
+> adapter lokal: `node server.js` → `/health` 200 dengan key yang benar, 401 tanpa key,
+> 422 untuk URL privat. `bash install.sh` belum ada di repo — itu langkah 5 yang tersisa.
+
 ---
 
 ## 1. Prerequisites on the VM
@@ -27,7 +32,7 @@ sudo apt-get install -y nodejs
 The VM agent clones (or forks) the public repo:
 
 ```bash
-git clone https://github.com/<user>/reascan.git
+git clone https://github.com/Rizkijack/reascan.git
 cd reascan/vm-adapter
 ```
 
