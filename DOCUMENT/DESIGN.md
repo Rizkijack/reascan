@@ -1,6 +1,6 @@
 # REA Web Platform — Technical Design
 
-**Versi:** 1.3 — langkah 1–6 terimplementasi + lulus tes & audit (engine, server, install tooling, frontend + Pages Functions)
+**Versi:** 1.4 — langkah 1–7: terimplementasi, teruji, audit seluruh tree selesai
 **Tanggal:** 2026-10-13
 **Status:** Blueprint untuk build. Complement PLAN.md (plan + arsitektur + fase). Dokumen ini = spec teknis: komponen, struktur kode, API contract, flow.
 **Keputusan frontend:** static, single page, vanilla HTML/CSS/JS — nol framework, nol build step.
@@ -371,8 +371,8 @@ export function validateUrl(rawUrl) → { ok, url } | { ok: false, reason }
 ```
 reascan/                       # repo root (publik, MIT)
 ├── DOCUMENT/
-│   ├── PLAN.md                    # plan + arsitektur + fase (v1.5)
-│   └── DESIGN.md                  # blueprint teknis (v1.3)
+│   ├── PLAN.md                    # plan + arsitektur + fase (v1.6)
+│   └── DESIGN.md                  # blueprint teknis (v1.4)
 ├── README.md                      # overview + arsitektur + deploy guide (VM agent)
 ├── LICENSE                        # MIT
 ├── .gitignore                     # .env, node_modules, dist, *.log, .dev.vars
@@ -386,6 +386,7 @@ reascan/                       # repo root (publik, MIT)
 │   ├── test/
 │   │   ├── analyze.test.js    # guard tests (offline, DI resolver)       ✅
 │   │   ├── proxy.test.js      # onRequestPost round-trip vs fake engine  ✅
+│   │   ├── integration.test.js # real edge function vs real adapter     ✅
 │   │   └── health.test.js     # fixed health response                    ✅
 │   └── functions/             # Pages Functions (Workers runtime, auto-route /api/*)
 │       └── api/
@@ -417,20 +418,19 @@ reascan/                       # repo root (publik, MIT)
     └── vm-setup.md            # panduan install untuk AI agent di VM
 ```
 
-**Kondisi saat ini:** langkah 1–6 lengkap dan sudah lewat tes + audit — `vm-adapter/`
+**Kondisi saat ini:** langkah 1–7 lengkap dan sudah lewat tes + audit — `vm-adapter/`
 (engine + server + install.sh, 63 test hijau, verified jalan lokal via `node server.js`)
-dan `frontend/` (page + Pages Functions, 19 test hijau: guard, proxy, health). Belum ada
-deploy, belum ada tunnel, belum ada Pages project. `install.sh` dan frontend belum pernah
-dieksekusi end-to-end di VM/Cloudflare sungguhan — itu bagian deploy (langkah 8). Yang juga
-belum: audit menyeluruh SELURUH tree (langkah 7) — audit sejauh ini fokus pada perubahan
-langkah 5–6.
+dan `frontend/` (page + Pages Functions, 22 test hijau: guard, proxy, integration,
+health). Audit seluruh tree (langkah 7) selesai — lihat §8. Belum ada deploy, belum ada
+tunnel, belum ada Pages project. `install.sh` dan frontend belum pernah dieksekusi
+end-to-end di VM/Cloudflare sungguhan — itu bagian deploy (langkah 8).
 
 `lib/body.js` tidak ada di tree asli — ditambahkan saat implementasi karena `fingerprint.js`
 dan `jsBundle.js` masing-masing membawa salinan `readCapped`.
 
-**Jumlah file MVP:** 24 file — 14 di `vm-adapter/` (5 test: urlGuard, fingerprint,
-jsBundle, server, reaMcp) dan 10 di `frontend/` (3 test: analyze, proxy, health).
-Nol framework, nol build step, nol Docker.
+**Jumlah file MVP:** 25 file — 14 di `vm-adapter/` (5 test: urlGuard, fingerprint,
+jsBundle, server, reaMcp) dan 11 di `frontend/` (4 test: analyze, proxy, integration,
+health). Nol framework, nol build step, nol Docker.
 
 `frontend/test/` (bukan `frontend/functions/api/*.test.js`) karena Pages Functions
 meng-compile setiap file di `functions/` jadi Worker route — file yang meng-import
@@ -565,19 +565,31 @@ Aturan shape: setiap finding = {key, value, type, evidence, confidence}. Type �
 - [x] `functions/api/health.js` — respons tetap
 - [x] `test/analyze.test.js` — guard offline (DI resolver)
 - [x] `test/proxy.test.js` — round-trip `onRequestPost` vs adapter palsu
+- [x] `test/integration.test.js` — edge asli vs adapter asli (temuan audit langkah 7)
 - [x] `test/health.test.js` — kontrak health
 
 **Belum:**
-- [ ] Audit menyeluruh seluruh tree (langkah 7)
 - [ ] Deploy Cloudflare Pages + tunnel VM (langkah 8)
 
-**Test:** 63 passing di `vm-adapter/` + 19 passing di `frontend/`. SSRF guard adapter
+**Test:** 63 passing di `vm-adapter/` + 22 passing di `frontend/`. SSRF guard adapter
 diuji offline (denylist, IPv4-mapped, IPv4-compatible, encoding alternatif, redirect ke
 metadata) plus verifikasi live lewat httpbin; `server.test.js` terakhir memakai jaringan
 sungguhan. Edge guard (`frontend/test/analyze.test.js`) full offline — DNS di-inject
 sebagai fake resolver (DI seam); `frontend/test/proxy.test.js` menjalankan `onRequestPost`
 sungguhan terhadap adapter palsu lokal (key forwarding, pass-through findings, mapping
-status, body rusak); `frontend/test/health.test.js` mengunci respons health yang tetap.
+status, body rusak); `frontend/test/health.test.js` mengunci respons health yang tetap;
+`frontend/test/integration.test.js` menjalankan Pages Function ASLI terhadap adapter ASLI
+(401 yang di-remap ke 502, kontrak tidak melebar, evidence standard pada temuan).
+
+**Audit seluruh tree (langkah 7) — hasil:** bersih. Yang diperiksa: tidak ada `fetch()` ke
+target yang bypass `safeFetch` (satu-satunya `fetch` mentah ada di dalam `urlGuard.js`,
+browser same-origin, dan panggilan edge ke engine pada URL konfigurasi); nol dependency
+eksternal (semua import `node:` atau relatif); nol `console.*` di path produksi; nol `TODO`
+tanpa owner; denylist identik di dua tempat (test parity mengunci); `AGENTS.md` tidak
+ter-track; tidak ada skor numerik; secret-pattern detection tetap absen. Temuan: dua
+indentasi komentar yang rusak (`fingerprint.js`, `jsBundle.js`) — diperbaiki. Batasan yang
+tetap ada: build `wrangler pages` belum pernah dijalankan, `install.sh` belum dieksekusi di
+VM ber-systemd, dan `app.js` belum diuji unit (tanpa DOM di Node).
 
 **Mapping error edge (keputusan audit):** `analyze.js` TIDAK meneruskan status engine apa
 adanya. Kontrak publik §5 hanya mengizinkan 200/422/502, jadi 422 engine tetap 422
