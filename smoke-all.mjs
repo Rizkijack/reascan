@@ -416,7 +416,8 @@ group('install.sh');
   if (!BASH) {
     for (const name of ['creates .env with a 64-hex key', 'prints the key once for the operator',
       'a placeholder key is replaced, not shipped', 'a template with no API_KEY line fails loudly',
-      'and leaves no stranded .env behind']) {
+      'and leaves no stranded .env behind', 'a missing .env.example is refused, not worked around',
+      'a missing template still leaves no .env behind', 'the tunnel unit interpolates $PORT rather than a literal']) {
       skip(name, 'no usable bash');
     }
   }
@@ -442,6 +443,19 @@ group('install.sh');
     try { run(tmp); } catch { died = true; }
     check('a template with no API_KEY line fails loudly', died);
     check('and leaves no stranded .env behind', !(() => { try { readFileSync(join(tmp, '.env')); return true; } catch { return false; } })());
+
+    // Regression guard for the case that left a 0-byte .env: the shell creates the
+    // destination before sed reads the source, so a missing template used to leave
+    // an empty file that every later run then treated as configured.
+    rmSync(join(tmp, '.env.example'), { force: true });
+    rmSync(join(tmp, '.env'), { force: true });
+    let refused = false;
+    try { run(tmp); } catch { refused = true; }
+    check('a missing .env.example is refused, not worked around', refused);
+    check('a missing template still leaves no .env behind', !(() => { try { readFileSync(join(tmp, '.env')); return true; } catch { return false; } })());
+
+    // The tunnel unit must follow PORT out of .env, or the two services drift.
+    check('the tunnel unit interpolates $PORT rather than a literal', /\$PORT/.test(sh) && /cloudflared tunnel --url http:\/\/localhost:\$PORT/.test(sh));
   } catch (err) {
     // Only the no-shell signal is expected here; anything else is a real bug and
     // must not be swallowed.
@@ -663,6 +677,11 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   check('a storage refusal is surfaced in the history panel',
     /too large|kept the newest/.test(els['history-list'].textContent),
     els['history-list'].textContent.slice(0, 90));
+  // The notice must carry the class style.css targets, or it renders as if it were
+  // an ordinary entry — which is how it looked before the rule was added.
+  check('the notice carries the class style.css styles',
+    els['history-list'].children.some((li) => String(li.className).includes('history-notice')));
+  check('style.css actually defines that class', /\.history-notice\s*\{/.test(readFileSync('frontend/style.css', 'utf8')));
   check('the report still renders when history cannot be written', els['results'].hidden === false);
   globalThis.localStorage.setItem = realSetItem;
 

@@ -584,7 +584,7 @@ status, body rusak); `frontend/test/health.test.js` mengunci respons health yang
 (401 yang di-remap ke 502, kontrak tidak melebar, evidence standard pada temuan).
 
 **Smoke lokal (tanpa VM):** `node smoke-e2e.mjs` — rantai langkah 1-6, 25 cek.
-`node smoke-all.mjs` - 168 cek fitur untuk langkah 1-7, termasuk `app.js` dijalankan di
+`node smoke-all.mjs` - 173 cek fitur untuk langkah 1-7, termasuk `app.js` dijalankan di
 DOM shim (submit sukses/gagal, riwayat, clear) dan blok `.env` milik `install.sh`
 dieksekusi di direktori sementara. Jaringan hanya dipakai saat guard-nya sendiri yang
 diuji (DNS, TLS, redirect hop, analisa live example.com); sisanya injeksi dependency atau

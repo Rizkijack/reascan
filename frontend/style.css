@@ -48,7 +48,12 @@ input[type="url"] {
   border: 1px solid var(--border); border-radius: 6px;
   padding: 10px 12px; font: inherit;
 }
-input[type="url"]:focus { outline: none; border-color: #666; }
+input[type="url"]:focus { border-color: #666; }
+/* The ring was removed outright, which left keyboard users with nothing but a
+   slightly lighter border on a near-black field. :focus-visible restores a real
+   indicator for keyboard navigation without putting a ring on every click. */
+input[type="url"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 button {
   background: var(--accent); color: #000;
@@ -78,6 +83,10 @@ button:disabled { opacity: 0.5; cursor: default; }
   vertical-align: -2px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* An endlessly rotating element is exactly what this query exists for. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-top-color: var(--muted); }
+}
 
 .verdict { margin-bottom: 20px; }
 .badge {
@@ -91,6 +100,10 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 table { width: 100%; border-collapse: collapse; margin: 10px 0 24px; font-size: 14px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+/* Evidence strings and endpoint paths can be long and unbroken; without this a
+   single one stretches the table past the viewport on a phone, and the panel has
+   no horizontal scroll of its own. */
+td { overflow-wrap: anywhere; }
 th { color: var(--muted); font-weight: 500; font-size: 13px; }
 td code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 
@@ -105,7 +118,6 @@ td code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
 
 .limitations, .unknowns { margin-top: 10px; }
 .limitations h3, .unknowns h3 { font-size: 14px; margin: 18px 0 6px; color: var(--danger); }
-.unknowns h3 { color: var(--danger); }
 .limitations ul, .unknowns ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
 
 .history { list-style: none; margin: 0; padding: 0; }
@@ -118,6 +130,14 @@ td code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
 .history button:hover { background: #111; }
 .history .url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history .meta { color: var(--muted); white-space: nowrap; font-size: 13px; }
+
+/* Not an entry — it explains why entries are missing. Reads as a warning rather
+   than as another analysis, and carries no button. Selector is two classes deep
+   so it also beats `.history li`, which sets the separator border. */
+.history .history-notice {
+  border-bottom: none; color: var(--danger);
+  font-size: 13px; padding: 10px 4px; list-style: none;
+}
 
 .site-footer {
   max-width: 860px; margin: 0 auto; padding: 24px 20px 40px;
