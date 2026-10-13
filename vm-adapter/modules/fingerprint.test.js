@@ -183,6 +183,16 @@ test('every finding carries the full evidence shape', async () => {
   }
 });
 
+test('an error page is disclosed — headers are real but the body is not a normal document', async () => {
+  const f = await fingerprint('https://example.com/', mockSafeFetch('<html>404</html>', {
+    status: 404,
+    headers: { server: 'nginx' },
+  }), stubTls(TLS_FIXTURE));
+
+  assert.ok(f.findings.some((x) => x.key === 'server'), 'the server header is still a real observation');
+  assert.match(f.limitations.join(' '), /HTTP 404/);
+});
+
 test('body reads are capped so a target cannot stream unbounded data in', async () => {
   const huge = 'x'.repeat(4 * 1024 * 1024);
   const f = await fingerprint('https://example.com/', mockSafeFetch(huge), stubTls(TLS_FIXTURE));

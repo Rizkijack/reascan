@@ -89,6 +89,12 @@ export async function fingerprint(url, safeFetch, probeTls = safeTlsInfo) {
   const serverHeader = headers.get('server');
   const poweredBy = headers.get('x-powered-by');
 
+  if (!response.ok) {
+    // Headers still describe the real server, but anything read from the body
+    // came off an error page — say so rather than letting it read as a normal scan.
+    limitations.push(`target returned HTTP ${response.status} — response headers are real, but any framework marker was read from the error page`);
+  }
+
   if (serverHeader) {
     findings.push(finding('server', serverHeader, 'observation',
       `Server response header: "${serverHeader}"`, 'high'));
