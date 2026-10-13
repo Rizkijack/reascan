@@ -59,8 +59,10 @@ reascan/
 │   ├── app.js               # fetch + render + localStorage history
 │   ├── package.json         # type: module (ESM for node --test)
 │   ├── .dev.vars.example    # local dev vars (VM_ADAPTER_URL, API_KEY)
-│   ├── test/                # guard tests (outside functions/ on purpose)
-│   │   └── analyze.test.js  # validateUrl offline tests
+│   ├── test/                # tests (outside functions/ on purpose — see note)
+│   │   ├── analyze.test.js  # validateUrl guard, offline via injected DNS
+│   │   ├── proxy.test.js    # onRequestPost round-trip vs a local fake engine
+│   │   └── health.test.js   # fixed health contract
 │   └── functions/api/       # Pages Functions (auto-routed /api/*)
 │       ├── analyze.js       # handler + SSRF guard (validateUrl exported for tests)
 │       └── health.js        # GET /api/health
@@ -75,7 +77,7 @@ reascan/
 │   │   ├── urlGuard.js      # denylist + DNS + redirect-hop validation
 │   │   ├── body.js          # bounded response reads
 │   │   └── reaMcp.js        # REA MCP client (phase 2 stub)
-│   └── .env.example         # API_KEY, PORT template
+│   └── .env.example         # API_KEY, PORT, HOST template
 ├── README.md
 ├── LICENSE                  # MIT
 └── .gitignore

@@ -141,9 +141,9 @@ async function collect(url, safeFetch, limits) {
   }
 
   // Capped for the same reason as each bundle: the entry document is attacker-
-// controlled too, and a target that never closes the connection would otherwise
-// stream until the adapter runs out of memory.
-const html = (await readCapped(page.response, cfg.maxPageBytes)).text;
+  // controlled too, and a target that never closes the connection would otherwise
+  // stream until the adapter runs out of memory.
+  const html = (await readCapped(page.response, cfg.maxPageBytes)).text;
   const scripts = extractScripts(html, page.finalUrl);
 
   if (scripts.length === 0) {

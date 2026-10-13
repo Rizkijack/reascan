@@ -1,6 +1,6 @@
 # REA Web Platform — Technical Plan
 
-**Versi:** 1.4 — Fase 1: 6/8 langkah, engine + server + install tooling + frontend selesai, deploy belum
+**Versi:** 1.5 — Fase 1: 6/8 langkah (lulus tes + audit step-wise), engine + server + install tooling + frontend selesai, deploy belum
 **Tanggal:** 2026-10-13
 **Konsep:** Website lite + online REA. Website = layer output/tampilan. VM = engine analisa (skill REA utuh). User paste URL → diproses di VM → hasil ditampilkan sebagai data terstruktur.
 **Keputusan deploy:** Cloudflare free tier (Pages + Workers + D1 + R2 + Tunnel). VM sudah ada (existing). Biaya Cloudflare: $0.
@@ -188,13 +188,13 @@ Detail shape + aturan (type/evidence/confidence/limitation/unknown) di DESIGN.md
 
 ## 7. SSRF Guard Checklist (WAJIB — ini gate keamanan)
 
-Layer 1 (Workers, sebelum forward ke VM):
-- [ ] Denylist: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (metadata!), 0.0.0.0, ::1, fc00::/7
-- [ ] Resolve DNS dulu → cek IP hasil resolve bukan hostname (cegah DNS rebinding)
-- [ ] Blokir scheme non-http(s): file://, gopher://, ftp://
-- [ ] Blokir redirect ke internal: follow redirect manual, validasi tiap hop
+Layer 1 (Workers, sebelum forward ke VM) — **implementasi: `frontend/functions/api/analyze.js`, teruji offline:**
+- [x] Denylist: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (metadata!), 0.0.0.0, ::1, fc00::/7 — salinan identik `urlGuard.js`, dikunci test parity
+- [x] Resolve DNS dulu → cek IP hasil resolve bukan hostname (cegah DNS rebinding) — pakai `resolve4`/`resolve6`; Workers `node:dns` tidak mengimplementasikan `lookup`
+- [x] Blokir scheme non-http(s): file://, gopher://, ftp://
+- [x] Blokir redirect ke internal: follow redirect manual, validasi tiap hop — **di adapter (Layer 3, `safeFetch`)**, bukan di edge; edge tidak pernah fetch target, jadi hop-walk di sana dead code
 - [x] ~~Rate limit per IP + global cap~~ — skip MVP (free tier 100k req/hari = pembatas alami; Cloudflare zone rules saat custom domain)
-- [ ] Timeout fetch ketat (10 detik)
+- [x] Timeout fetch ketat — 10 detik per-fetch di adapter; edge→engine 60 detik (engine deadline 45 detik) supaya tunnel mati tidak menggantung browser
 
 Layer 2 (VM network policy):
 - [ ] VM egress: hanya keluar via proxy yang enforce denylist yang sama
@@ -274,14 +274,14 @@ Query D1 dari Workers: `env.DB.prepare(...).bind(...).run()`. JSON parse di Work
 
 **Status: 6 dari 8 langkah selesai. Engine + server + install tooling + frontend lengkap dan teruji, belum ada deploy.**
 
-- [x] VM: modul `urlGuard.js` (denylist, DNS resolve, redirect-hop, TLS probe) + test
-- [x] VM: modul `fingerprint.js` (headers/TLS/framework/CDN) + test
-- [x] VM: modul `jsBundle.js` (script inventory, endpoint, obfuscation) + test
-- [x] VM: `server.js` (`/analyze`, `/health`, auth, deadline, verdict) + test
-- [x] VM: `install.sh` + systemd services (adapter + cloudflared), `reaMcp.js` stub, `.env.example`
-- [x] Pages: `index.html`, `style.css`, `app.js` (form + report + history localStorage)
-- [x] Pages Functions: `analyze.js` (SSRF guard layer 1) + `health.js`
-- [ ] Audit menyeluruh seluruh tree, lalu deploy (Pages + tunnel)
+- [x] 1. VM: `lib/urlGuard.js` (denylist, DNS resolve, redirect-hop, TLS probe) + test
+- [x] 2. VM: `modules/fingerprint.js` (headers/TLS/framework/CDN) + test
+- [x] 3. VM: `modules/jsBundle.js` (script inventory, endpoint, obfuscation) + test
+- [x] 4. VM: `server.js` (`/analyze`, `/health`, auth, deadline, verdict) + test
+- [x] 5. VM: `install.sh` + systemd services (adapter + cloudflared), `reaMcp.js` stub, `.env.example`
+- [x] 6. Pages: `index.html`, `style.css`, `app.js` (form + report + history localStorage) + Pages Functions `analyze.js` (SSRF guard layer 1) dan `health.js`
+- [ ] 7. Audit menyeluruh seluruh tree
+- [ ] 8. Deploy Cloudflare Pages + tunnel VM
 
 **Deliverable:** user paste URL → dapat report tech stack + JS findings + verdict (standar evidence REA) dalam hitungan detik. Biaya Cloudflare: $0.
 

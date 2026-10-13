@@ -53,8 +53,8 @@ function detectCdn(headers, serverHeader) {
 function detectFramework(html, poweredBy) {
   const found = [];
 
-  // X-Powered-By is the server stating its own stack, so it carries more weight than
-// anything inferred from markup.
+  // X-Powered-By is the server stating its own stack, so it carries more weight
+  // than anything inferred from markup.
   if (poweredBy) {
     const known = { express: 'Express', php: 'PHP', 'asp.net': 'ASP.NET', 'php/': 'PHP' };
     for (const [needle, name] of Object.entries(known)) {

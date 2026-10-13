@@ -44,7 +44,7 @@ bash install.sh
 ```
 
 `install.sh` does:
-1. Copies `.env.example` → `.env` (never overwrites an existing `.env`; generates a random API_KEY on first run)
+1. Copies `.env.example` → `.env` (never overwrites an existing `.env`; generates a random API_KEY on first run, and checks the write landed so a half-written `.env` cannot strand the install)
 2. Installs `cloudflared` if missing (official release binary → `/usr/local/bin`)
 3. Writes + enables systemd units:
    - `reascan-adapter` — `node server.js` (WorkingDirectory = repo vm-adapter/, EnvironmentFile = .env)
@@ -55,17 +55,22 @@ Must run as root (`sudo bash install.sh`) — it writes to `/usr/local/bin` and 
 
 ## 4. Configure secrets
 
-Edit `vm-adapter/.env`:
+`install.sh` already generated a random `API_KEY` and printed it once
+(`reascan-install:   API_KEY = …`). To rotate it, or if you created `.env` by hand, edit
+`vm-adapter/.env`:
 
 ```
 API_KEY=<long-random-string>
 PORT=8787
+HOST=127.0.0.1
 ```
 
-The **same** `API_KEY` must be set as a secret in the Cloudflare Pages dashboard (Settings → Environment variables → Add secret) and in `VM_ADAPTER_URL` (the tunnel hostname). Generate one:
+The **same** `API_KEY` must be set as a secret in the Cloudflare Pages dashboard
+(Settings → Environment variables → Add secret), together with `VM_ADAPTER_URL` (the tunnel
+hostname). Generate one yourself:
 
 ```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 ```
 
 ## 5. Cloudflare Tunnel
