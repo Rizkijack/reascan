@@ -1,155 +1,202 @@
-// JS bundle inventory — what the page loads, how big it is, whether it ships a
-// sourcemap, which endpoint-shaped literals appear in it, and whether the code
-// looks obfuscated.
+// JS bundle inventory — what the page loads, whether sourcemaps are published,
+// what endpoint strings appear in the code, and whether it looks obfuscated.
 //
-// Two rules from AGENTS.md shape this file:
-//   - nothing is dropped silently. A bundle that fails, times out or exceeds a
-//     limit becomes a limitation, never a missing row.
-//   - no secret-pattern detection. An endpoint is reported because the literal is
-//     in the file, not because its name looks sensitive.
+// safeFetch is injected so tests stay offline and this module cannot open a
+// socket on its own. Every bundle that fails, times out or exceeds a limit is
+// written into limitations — a partial inventory is reported as partial, never as
+// a complete one.
 //
-// safeFetch is injected. This module cannot open a socket on its own.
+// No secret-pattern detection here. AGENTS.md is explicit: do not infer secrecy
+// from names or text patterns. Endpoints are reported as strings that appear in
+// the code, nothing more.
 
-import { readCapped } from '../lib/body.js';
+const DEFAULT_LIMITS = {
+  maxBundles: 40,
+  maxBytes: 1048576,
+  timeoutMs: 10000,
+  concurrency: 6,
+  maxPageBytes: 4 * 1024 * 1024,
+};
 
-export const DEFAULT_LIMITS = { maxBundles: 40, maxBytes: 1048576, timeoutMs: 10000 };
+// Only the src matters; inline scripts have no separate file to fetch.
+const SCRIPT_SRC = /<script\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
 
-// A page can reference hundreds of scripts; only API-shaped literals are worth
-// reporting and a minified bundle holds thousands of strings.
-const MAX_ENDPOINTS_PER_BUNDLE = 25;
-
-// Signatures that indicate deliberate obfuscation. Entropy scoring is not
-// implemented — these are markers, so the finding stays a derivation.
-const OBFUSCATION_SIGNATURES = [
-  'eval(atob(',
-  'eval(function(p,a,c,k,e,',
-  'eval(function(p,a,c,k,e,d,',
-  '_0x',
-  '_0x1',
+// Quoted strings shaped like API paths. Kept deliberately narrow — a loose match
+// turns a minified bundle into thousands of garbage endpoints.
+const ENDPOINT_PATTERNS = [
+  /["'`](\/(?:api|v\d+)\/[A-Za-z0-9_\-./{}:$?&=]{1,80})["'`]/g,
+  /["'`](https?:\/\/[A-Za-z0-9.\-]+\/(?:api|v\d+)\/[A-Za-z0-9_\-./{}:$?&=]{1,80})["'`]/g,
 ];
 
-function extractScriptSrc(html) {
-  const sources = [];
-  const pattern = /<script\b[^>]*\bsrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi;
-  let match;
-  while ((match = pattern.exec(html)) !== null) {
-    const raw = (match[2] ?? match[3] ?? match[4] ?? '').trim();
-    if (raw) sources.push(raw);
+const MAX_ENDPOINTS_PER_BUNDLE = 50;
+
+// Strong signals only. Whole-bundle entropy was rejected: a minified bundle is
+// high-entropy by construction, so that check fires on essentially every real
+// site and tells the reader nothing.
+const OBFUSCATION_SIGNALS = [
+  { name: 'eval(atob(', re: /eval\s*\(\s*atob\s*\(/ },
+  { name: 'eval(unatob(', re: /eval\s*\(\s*window\.atob\s*\(/ },
+  { name: 'packer signature', re: /eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e/ },
+  { name: 'base64 blob', re: /["'`][A-Za-z0-9+/]{200,}={0,2}["'`]/ },
+];
+
+// Cap the read so a hostile bundle cannot stream unbounded data into the adapter.
+async function readCapped(response, maxBytes) {
+  if (!response.body) return { text: '', bytes: 0, truncated: false };
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  let truncated = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.length;
+    chunks.push(value);
+    if (bytes >= maxBytes) {
+      truncated = true;
+      await reader.cancel();
+      break;
+    }
   }
-  return sources;
+  return {
+    text: Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8'),
+    bytes: Math.min(bytes, maxBytes),
+    truncated,
+  };
 }
 
-// Absolute + deduped. Relative sources resolve against the page we actually
-// landed on, not the URL the user typed — a redirect changes what resolves.
-function resolveSources(sources, baseUrl, limitations) {
-  const resolved = [];
-  for (const src of sources) {
-    if (src.startsWith('data:') || src.startsWith('blob:')) continue;
+function extractScripts(html, baseUrl) {
+  const found = [];
+  const seen = new Set();
+
+  for (const match of html.matchAll(SCRIPT_SRC)) {
+    const raw = (match[1] || match[2] || match[3] || '').trim();
+    if (!raw) continue;
+
     let absolute;
     try {
-      absolute = new URL(src, baseUrl).toString();
+      absolute = new URL(raw, baseUrl).toString();
     } catch {
-      limitations.push(`could not resolve script src: ${src}`);
       continue;
     }
-    if (!resolved.includes(absolute)) resolved.push(absolute);
+
+    // data: and blob: are inline payloads, not fetchable bundles.
+    if (!absolute.startsWith('http:') && !absolute.startsWith('https:')) continue;
+    if (seen.has(absolute)) continue;
+    seen.add(absolute);
+    found.push(absolute);
   }
-  return resolved;
+
+  return found;
 }
 
-// Endpoints are observations of a literal in the file. That a literal *is* an API
-// route is a step further, which is why the finding only claims the literal.
-function extractEndpoints(source) {
-  const pattern = /["'`](\/[A-Za-z0-9_\-./:{}$]{2,120})["'`]/g;
-  const seen = [];
-  let match;
-  while ((match = pattern.exec(source)) !== null) {
-    const path = match[1];
-    if (!/^\/(api|v\d+|graphql|rest|rpc|oauth|auth|ws)\b/i.test(path)) continue;
-    if (path.endsWith('.js') || path.endsWith('.css') || path.endsWith('.map')) continue;
-    if (!seen.includes(path)) seen.push(path);
-    if (seen.length >= MAX_ENDPOINTS_PER_BUNDLE) break;
+function extractEndpoints(js) {
+  const endpoints = new Set();
+  for (const pattern of ENDPOINT_PATTERNS) {
+    for (const match of js.matchAll(pattern)) {
+      endpoints.add(match[1]);
+      if (endpoints.size >= MAX_ENDPOINTS_PER_BUNDLE) return [...endpoints];
+    }
   }
-  return seen;
+  return [...endpoints];
 }
 
-function detectObfuscation(source) {
-  return OBFUSCATION_SIGNATURES.find((sig) => source.includes(sig)) ?? null;
+function detectObfuscation(js) {
+  return OBFUSCATION_SIGNALS.filter((s) => s.re.test(js)).map((s) => s.name);
 }
 
-async function analyseBundle(src, safeFetch, limits, limitations) {
+async function analyzeOne(src, safeFetch, limits, limitations) {
   const fetched = await safeFetch(src, { timeoutMs: limits.timeoutMs });
   if (!fetched.ok) {
-    limitations.push(`${src}: ${fetched.reason}`);
+    limitations.push(`${src} — not analysed: ${fetched.reason}`);
     return null;
   }
 
-  const body = await readCapped(fetched.response, limits.maxBytes);
-  if (body.truncated) {
-    limitations.push(`${src}: exceeds ${limits.maxBytes} byte limit, analysed the first ${limits.maxBytes} bytes`);
+  const { response } = fetched;
+  if (!response.ok) {
+    limitations.push(`${src} — not analysed: HTTP ${response.status}`);
+    return null;
   }
 
-  const sourcemap = /\/\/[#@]\s*sourceMappingURL=/.test(body.text);
-  const endpoints = extractEndpoints(body.text);
-  const signature = detectObfuscation(body.text);
+  const { text, bytes, truncated } = await readCapped(response, limits.maxBytes);
+  if (truncated) {
+    limitations.push(`${src} — truncated at ${limits.maxBytes} bytes; content past the cap was not analysed`);
+  }
 
-  const bundle = {
+  const hits = detectObfuscation(text);
+
+  return {
     src,
-    size_kb: Math.round(body.bytes / 1024),
-    sourcemap,
-    endpoints,
-    obfuscated: signature !== null,
+    // size_bytes is the exact figure; size_kb is rounded for display and reads
+    // 0.0 for anything under ~50 bytes, so it alone cannot back the claim.
+    size_bytes: bytes,
+    size_kb: Math.round((bytes / 1024) * 10) / 10,
+    sourcemap: /\/\/#\s*sourceMappingURL\s*=/.test(text),
+    endpoints: extractEndpoints(text),
+    obfuscated: hits.length > 0,
+    obfuscation_signals: hits,
   };
-
-  if (signature) bundle.obfuscation_marker = signature;
-  if (endpoints.length === MAX_ENDPOINTS_PER_BUNDLE) {
-    limitations.push(`${src}: endpoint list capped at ${MAX_ENDPOINTS_PER_BUNDLE}, more may be present`);
-  }
-
-  return bundle;
 }
 
+// The exported function is the boundary: a target must never be able to make it
+// reject. safeFetch is contractually non-throwing, but a defensive catch keeps a
+// hostile target from turning a partial report into a dead request.
 export async function analyzeBundles(url, safeFetch, limits = {}) {
-  const merged = { ...DEFAULT_LIMITS, ...limits };
-  const bundles = [];
+  try {
+    return await collect(url, safeFetch, limits);
+  } catch (err) {
+    return { bundles: [], limitations: [`analysis aborted: ${err.message}`] };
+  }
+}
+
+async function collect(url, safeFetch, limits) {
+  const cfg = { ...DEFAULT_LIMITS, ...limits };
   const limitations = [];
 
-  const page = await safeFetch(url, { timeoutMs: merged.timeoutMs });
+  const page = await safeFetch(url, { timeoutMs: cfg.timeoutMs });
   if (!page.ok) {
     limitations.push(`page fetch failed: ${page.reason}`);
-    return { bundles, limitations };
+    return { bundles: [], limitations };
+  }
+  if (!page.response.ok) {
+    limitations.push(`page fetch returned HTTP ${page.response.status}`);
+    return { bundles: [], limitations };
   }
 
-  const pageBody = await readCapped(page.response, merged.maxBytes);
-  if (pageBody.truncated) {
-    limitations.push(`page exceeds ${merged.maxBytes} byte limit, script tags may be missing`);
+  // Capped for the same reason as each bundle: the entry document is attacker-
+// controlled too, and a target that never closes the connection would otherwise
+// stream until the adapter runs out of memory.
+const html = (await readCapped(page.response, cfg.maxPageBytes)).text;
+  const scripts = extractScripts(html, page.finalUrl);
+
+  if (scripts.length === 0) {
+    limitations.push('no external <script src> found on the page');
   }
 
-  const sources = resolveSources(extractScriptSrc(pageBody.text), page.finalUrl, limitations);
-
-  if (sources.length === 0) {
-    limitations.push('no external script tags found');
-    return { bundles, limitations };
+  const overflow = scripts.length - cfg.maxBundles;
+  const queue = scripts.slice(0, cfg.maxBundles);
+  if (overflow > 0) {
+    limitations.push(`${overflow} further <script src> entries not analysed — maxBundles limit is ${cfg.maxBundles}`);
   }
 
-  if (sources.length > merged.maxBundles) {
-    limitations.push(`${sources.length} script tags found, only the first ${merged.maxBundles} analysed`);
-  }
+  const bundles = [];
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < queue.length) {
+      const src = queue[cursor++];
+      // Caught per bundle: one target that resets the socket must not discard
+      // the bundles that were fetched successfully.
+      try {
+        const result = await analyzeOne(src, safeFetch, cfg, limitations);
+        if (result) bundles.push(result);
+      } catch (err) {
+        limitations.push(`${src} — not analysed: ${err.message}`);
+      }
+    }
+  };
 
-  const selected = sources.slice(0, merged.maxBundles);
+  await Promise.all(Array.from({ length: Math.min(cfg.concurrency, queue.length) }, worker));
 
-  // Concurrent, because 40 sequential fetches at 10s each blows the 60s budget
-  // the Pages Function gives the whole request. maxBundles already bounds fan-out.
-  const results = await Promise.all(selected.map((src) => analyseBundle(src, safeFetch, merged, limitations)));
-
-  for (const bundle of results) {
-    if (bundle) bundles.push(bundle);
-  }
-
-  const failed = results.filter((r) => r === null).length;
-  if (failed) {
-    limitations.push(`${failed} of ${selected.length} bundles could not be analysed`);
-  }
-
+  limitations.sort();
   return { bundles, limitations };
 }
