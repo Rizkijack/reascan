@@ -315,7 +315,7 @@ Query D1 dari Workers: `env.DB.prepare(...).bind(...).run()`. JSON parse di Work
 8. ~~Deploy VM~~ — nol Docker: `install.sh` → systemd services (adapter + cloudflared)
 9. ~~Fallback hosting~~ — Vercel hanya darurat kalau Cloudflare 100% gagal; nol file di repo (single deploy path)
 10. ~~License~~ — MIT (repo publik)
-11. ~~Agent configs (opencode/openagent/kilocode)~~ — skip: tooling mesin, bukan bagian proyek ~~→ dibalik 2026-10-13~~ — `AGENTS.md` dibuat di repo root. Alasan: convention git (selalu commit + push ke `main`) dan security invariant `urlGuard` harus stick di luar chat; agent cuma baca kalau filenya ada. Isinya instruksi saja, nol tooling/config
+11. ~~Agent configs (opencode/openagent/kilocode)~~ — skip: tooling mesin, bukan bagian proyek ~~→ dibalik sebagian 2026-10-13~~ — `AGENTS.md` dibuat di repo root tapi **local only** (masuk `.gitignore`, `git rm --cached`). Konvensi git + security invariant `urlGuard` harus stick di luar chat, tapi file-nya bukan bagian proyek publik. Nggak ada tooling/config di dalamnya, cuma instruksi
 12. ~~Test e2e~~ — curl ke URL nyata (apapun yang aktif saat testing)
 
 **Masih terbuka (fase 2, tidak block MVP):**

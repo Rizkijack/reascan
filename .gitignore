@@ -19,3 +19,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# agent config (local only — convention tidak ikut ke repo publik)
+AGENTS.md
+CLAUDE.md
