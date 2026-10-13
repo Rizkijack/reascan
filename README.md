@@ -53,6 +53,8 @@ reascan/
 │   └── DESIGN.md            # technical blueprint, module contracts, deploy steps
 ├── docs/
 │   └── vm-setup.md          # VM install guide (for the agent on the VM)
+├── smoke-e2e.mjs            # end-to-end smoke: steps 1-6 as one chain
+├── smoke-all.mjs            # feature smoke for every step 1-7 (local, no VM)
 ├── frontend/                # Cloudflare Pages project (single deploy unit)
 │   ├── index.html           # the page: form + results panel
 │   ├── style.css            # Vercel-dark theme, vanilla
@@ -104,6 +106,8 @@ Fase 1, 7 of 8 steps done. Engine, server, install tooling, and the full fronten
 `node --test` — **63 passing** inside `vm-adapter/` (the last three server tests reach the real network; everything else runs offline) and **22 passing** inside `frontend/`: guard tests offline through an injected DNS resolver, proxy round-trips against a local stand-in adapter (key forwarding, findings pass-through, status mapping, malformed engine replies), the fixed health response, and an integration test that drives the real Pages Function against the real adapter.
 
 The adapter has been verified running locally but has never been installed on a VM. `install.sh` and the frontend are written to spec but unexercised end-to-end: no tunnel, no Pages project, nothing live.
+
+Two scripts cover the whole chain locally, no VM required: `node smoke-e2e.mjs` (steps 1-6 in one pass, 25 checks) and `node smoke-all.mjs` (every feature of steps 1-7, 162 checks). They touch the live network only where the guard itself is under test; everything else runs on injected dependencies or a local server.
 
 ## MVP scope
 

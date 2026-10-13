@@ -376,6 +376,8 @@ reascan/                       # repo root (publik, MIT)
 ├── README.md                      # overview + arsitektur + deploy guide (VM agent)
 ├── LICENSE                        # MIT
 ├── .gitignore                     # .env, node_modules, dist, *.log, .dev.vars
+├── smoke-e2e.mjs                  # smoke end-to-end: langkah 1-6 satu rantai
+├── smoke-all.mjs                  # smoke fitur tiap langkah 1-7 (lokal, tanpa VM)
 │
 ├── frontend/                  # Cloudflare Pages project (SATU deploy unit — no-conflict)
 │   ├── index.html             # 1 halaman: form + results panel          ✅
@@ -580,6 +582,13 @@ sungguhan terhadap adapter palsu lokal (key forwarding, pass-through findings, m
 status, body rusak); `frontend/test/health.test.js` mengunci respons health yang tetap;
 `frontend/test/integration.test.js` menjalankan Pages Function ASLI terhadap adapter ASLI
 (401 yang di-remap ke 502, kontrak tidak melebar, evidence standard pada temuan).
+
+**Smoke lokal (tanpa VM):** `node smoke-e2e.mjs` — rantai langkah 1-6, 25 cek.
+`node smoke-all.mjs` — 162 cek fitur untuk langkah 1-7, termasuk `app.js` dijalankan di
+DOM shim (submit sukses/gagal, riwayat, clear) dan blok `.env` milik `install.sh`
+dieksekusi di direktori sementara. Jaringan hanya dipakai saat guard-nya sendiri yang
+diuji (DNS, TLS, redirect hop, analisa live example.com); sisanya injeksi dependency atau
+server lokal. Bagian yang butuh VM (cloudflared, systemd) tidak diikutkan.
 
 **Audit seluruh tree (langkah 7) — hasil:** bersih. Yang diperiksa: tidak ada `fetch()` ke
 target yang bypass `safeFetch` (satu-satunya `fetch` mentah ada di dalam `urlGuard.js`,
