@@ -385,7 +385,8 @@ reascan/                       # repo root (publik, MIT)
 │   ├── .dev.vars.example      # VM_ADAPTER_URL + API_KEY                  ✅
 │   ├── test/
 │   │   ├── analyze.test.js    # guard tests (offline, DI resolver)       ✅
-│   │   └── proxy.test.js      # onRequestPost round-trip vs fake engine  ✅
+│   │   ├── proxy.test.js      # onRequestPost round-trip vs fake engine  ✅
+│   │   └── health.test.js     # fixed health response                    ✅
 │   └── functions/             # Pages Functions (Workers runtime, auto-route /api/*)
 │       └── api/
 │           ├── analyze.js     # handler + SSRF guard inline             ✅
@@ -561,13 +562,13 @@ Aturan shape: setiap finding = {key, value, type, evidence, confidence}. Type �
 - [ ] Audit menyeluruh seluruh tree
 - [ ] Deploy Cloudflare Pages + tunnel VM
 
-**Test:** 63 passing di `vm-adapter/` + 17 passing di `frontend/`. SSRF guard adapter
+**Test:** 63 passing di `vm-adapter/` + 19 passing di `frontend/`. SSRF guard adapter
 diuji offline (denylist, IPv4-mapped, IPv4-compatible, encoding alternatif, redirect ke
 metadata) plus verifikasi live lewat httpbin; `server.test.js` terakhir memakai jaringan
 sungguhan. Edge guard (`frontend/test/analyze.test.js`) full offline — DNS di-inject
 sebagai fake resolver (DI seam); `frontend/test/proxy.test.js` menjalankan `onRequestPost`
 sungguhan terhadap adapter palsu lokal (key forwarding, pass-through findings, mapping
-status, body rusak).
+status, body rusak); `frontend/test/health.test.js` mengunci respons health yang tetap.
 
 **Mapping error edge (keputusan audit):** `analyze.js` TIDAK meneruskan status engine apa
 adanya. Kontrak publik §5 hanya mengizinkan 200/422/502, jadi 422 engine tetap 422

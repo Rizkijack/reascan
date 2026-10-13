@@ -98,7 +98,7 @@ Fase 1, 6 of 8 steps done. Engine, server, install tooling, and the full fronten
 | 7 | Whole-tree audit | not started |
 | 8 | Deploy (Pages + Tunnel) | not started |
 
-`node --test` — **63 passing** inside `vm-adapter/` (the last three server tests reach the real network; everything else runs offline) and **17 passing** inside `frontend/`: guard tests offline through an injected DNS resolver, plus proxy round-trips against a local stand-in adapter (key forwarding, findings pass-through, status mapping, malformed engine replies).
+`node --test` — **63 passing** inside `vm-adapter/` (the last three server tests reach the real network; everything else runs offline) and **19 passing** inside `frontend/`: guard tests offline through an injected DNS resolver, proxy round-trips against a local stand-in adapter (key forwarding, findings pass-through, status mapping, malformed engine replies), and the fixed health response.
 
 The adapter has been verified running locally but has never been installed on a VM. `install.sh` and the frontend are written to spec but unexercised end-to-end: no tunnel, no Pages project, nothing live.
 
