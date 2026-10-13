@@ -32,6 +32,7 @@ import { onRequestGet as healthGet } from './frontend/functions/api/health.js';
 // ---------------------------------------------------------------- harness
 let total = 0;
 let failed = 0;
+let skipped = 0;
 let stepFails = [];
 let currentStep = '';
 const section = (s) => { console.log(`\n== ${s} ==`); currentStep = s; };
@@ -43,6 +44,46 @@ const check = (name, cond, detail = '') => {
   console.log(`  FAIL  ${name}${detail ? ` — ${detail}` : ''}`);
 };
 const group = (name) => console.log(`  -- ${name}`);
+// A check that cannot run is not a pass and not a failure. Counting it as either
+// would misreport the suite: omitted silently it inflates confidence, counted as
+// FAIL it blames the code for a missing interpreter.
+const skip = (name, why) => { skipped++; console.log(`  skip  ${name} — ${why}`); };
+
+// ---------------------------------------------------------------- shell
+// install.sh is bash. On Windows that means Git Bash, which is not on PATH by
+// default, so a bare execFileSync('bash') throws ENOENT and takes the whole run
+// down with it — the step 5 checks never execute and the crash reads as a broken
+// tool rather than a result.
+//
+// Windows restores ProgramFiles in every child process, so the no-bash branch
+// cannot be provoked by clearing the environment. Candidates and the probe are
+// therefore parameters, which lets the same run assert that the fallback really
+// returns null instead of leaving it to inspection.
+function bashCandidates(env = process.env) {
+  const out = [];
+  if (process.platform === 'win32') {
+    for (const root of [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA]) {
+      if (root) out.push(join(root, 'Git', 'bin', 'bash.exe'), join(root, 'Programs', 'Git', 'bin', 'bash.exe'));
+    }
+  }
+  out.push('bash');
+  return out;
+}
+
+function probeBash(bin) {
+  try {
+    execFileSync(bin, ['-c', 'exit 0'], { stdio: 'ignore', timeout: 5000 });
+    return true;
+  } catch {
+    return false; // ENOENT (absent) or non-zero (broken) — not usable either way
+  }
+}
+
+function resolveBash(candidates = bashCandidates(), probe = probeBash) {
+  for (const bin of candidates) if (probe(bin)) return bin;
+  return null;
+}
+const BASH = resolveBash();
 
 // ---------------------------------------------------------------- helpers
 const mkSafeFetch = (map) => async (url) => {
@@ -339,7 +380,19 @@ section('step 5 — install.sh / reaMcp.js / .env.example (VM-only parts skipped
 group('install.sh');
 {
   const sh = readFileSync('vm-adapter/install.sh', 'utf8');
-  check('passes a shell syntax check', (() => { try { execFileSync('bash', ['-n', 'vm-adapter/install.sh']); return true; } catch { return false; } })());
+
+  // The resolver's contract, asserted rather than assumed: the no-bash path must
+  // yield null (so callers skip), and the first working candidate must win.
+  check('bash resolver returns null when nothing works', resolveBash([], () => false) === null);
+  check('bash resolver takes the first usable candidate', resolveBash(['a', 'b'], (b) => b === 'b') === 'b');
+  check('bash resolver skips broken candidates', resolveBash(['broken', 'good'], (b) => b === 'good') === 'good');
+  if (!BASH) skip('resolver found a real bash', 'none on this host — step 5 shell checks below are skipped');
+
+  if (BASH) {
+    check('passes a shell syntax check', (() => { try { execFileSync(BASH, ['-n', 'vm-adapter/install.sh']); return true; } catch { return false; } })());
+  } else {
+    skip('passes a shell syntax check', 'no usable bash (install Git Bash, or run on Linux)');
+  }
   check('refuses to run as non-root', /run as root/.test(sh));
   check('never overwrites an existing .env', /if \[ ! -f "\$ADAPTER_DIR\/\.env" \]/.test(sh));
   check('generates the key with node crypto', /randomBytes\(32\)/.test(sh) && /node:crypto/.test(sh));
@@ -354,17 +407,29 @@ group('install.sh');
     // with forward slashes and quoted, or the backslashes are read as escapes.
     const posix = dir.replace(/\\/g, '/');
     const script = `log() { printf 'log: %s\\n' "$*"; }\ndie() { printf 'die: %s\\n' "$*" >&2; exit 1; }\nADAPTER_DIR="${posix}"\n${block}`;
-    return execFileSync('bash', ['-c', script], { encoding: 'utf8' });
+    return execFileSync(BASH, ['-c', script], { encoding: 'utf8' });
   };
+
+  // Driving the extracted block needs a real shell; without one these are skipped
+  // rather than reported, so a Windows box without Git Bash does not silently
+  // claim the .env bootstrap was verified.
+  if (!BASH) {
+    for (const name of ['creates .env with a 64-hex key', 'prints the key once for the operator',
+      'a placeholder key is replaced, not shipped', 'a template with no API_KEY line fails loudly',
+      'and leaves no stranded .env behind']) {
+      skip(name, 'no usable bash');
+    }
+  }
+  check('docker-free: no docker in the unit files', !/docker/i.test(sh));
   const tmp = mkdtempSync(join(tmpdir(), 'reascan-env-'));
   try {
+    if (!BASH) throw new Error('skip-shell');
     writeFileSync(join(tmp, '.env.example'), 'API_KEY=\nPORT=8787\nHOST=127.0.0.1\n');
     const out = run(tmp);
     const env = readFileSync(join(tmp, '.env'), 'utf8');
     const key = env.match(/^API_KEY=(.+)$/m)?.[1] ?? '';
     check('creates .env with a 64-hex key', /^[0-9a-f]{64}$/.test(key), key.slice(0, 8));
     check('prints the key once for the operator', out.includes(key));
-    check('docker-free: no docker in the unit files', !/docker/i.test(sh));
 
     writeFileSync(join(tmp, '.env.example'), 'API_KEY=change-me\nPORT=8787\n');
     rmSync(join(tmp, '.env'));
@@ -377,6 +442,10 @@ group('install.sh');
     try { run(tmp); } catch { died = true; }
     check('a template with no API_KEY line fails loudly', died);
     check('and leaves no stranded .env behind', !(() => { try { readFileSync(join(tmp, '.env')); return true; } catch { return false; } })());
+  } catch (err) {
+    // Only the no-shell signal is expected here; anything else is a real bug and
+    // must not be swallowed.
+    if (err?.message !== 'skip-shell') throw err;
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -386,7 +455,11 @@ group('.env.example');
 {
   const env = readFileSync('vm-adapter/.env.example', 'utf8');
   check('declares API_KEY, PORT and HOST', /^API_KEY=/m.test(env) && /^PORT=8787/m.test(env) && /^HOST=127\.0\.0\.1/m.test(env));
-  check('sources cleanly in a POSIX shell', execFileSync('bash', ['-c', `set -a; . vm-adapter/.env.example; [ "$PORT" = 8787 ] && [ "$HOST" = 127.0.0.1 ] && echo yes`], { encoding: 'utf8' }).trim() === 'yes');
+  if (BASH) {
+    check('sources cleanly in a POSIX shell', execFileSync(BASH, ['-c', `set -a; . vm-adapter/.env.example; [ "$PORT" = 8787 ] && [ "$HOST" = 127.0.0.1 ] && echo yes`], { encoding: 'utf8' }).trim() === 'yes');
+  } else {
+    skip('sources cleanly in a POSIX shell', 'no usable bash');
+  }
 }
 
 group('reaMcp.js (phase-2 stub)');
@@ -635,9 +708,12 @@ group('evidence standard in the shipped shape');
 
 // ---------------------------------------------------------------- summary
 console.log(`\n${'='.repeat(60)}`);
-console.log(`SMOKE RESULT: ${total - failed}/${total} checks passed`);
+console.log(`SMOKE RESULT: ${total - failed}/${total} checks passed${skipped ? ` (${skipped} skipped — not run, not silently counted as passing)` : ''}`);
 if (failed) {
   console.log(`\nfailed checks:`);
   for (const f of stepFails) console.log(`  - ${f}`);
+}
+if (skipped) {
+  console.log(`\nskipped: ${skipped}. These were NOT verified in this run.`);
 }
 process.exit(failed === 0 ? 0 : 1);

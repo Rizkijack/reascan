@@ -422,7 +422,7 @@ reascan/                       # repo root (publik, MIT)
 
 **Kondisi saat ini:** langkah 1–7 lengkap dan sudah lewat tes + audit — `vm-adapter/`
 (engine + server + install.sh, 63 test hijau, verified jalan lokal via `node server.js`)
-dan `frontend/` (page + Pages Functions, 22 test hijau: guard, proxy, integration,
+dan `frontend/` (page + Pages Functions, 26 test hijau: guard, proxy, integration,
 health). Audit seluruh tree (langkah 7) selesai — lihat §8. Belum ada deploy, belum ada
 tunnel, belum ada Pages project. `install.sh` dan frontend belum pernah dieksekusi
 end-to-end di VM/Cloudflare sungguhan — itu bagian deploy (langkah 8).
@@ -584,7 +584,7 @@ status, body rusak); `frontend/test/health.test.js` mengunci respons health yang
 (401 yang di-remap ke 502, kontrak tidak melebar, evidence standard pada temuan).
 
 **Smoke lokal (tanpa VM):** `node smoke-e2e.mjs` — rantai langkah 1-6, 25 cek.
-`node smoke-all.mjs` — 162 cek fitur untuk langkah 1-7, termasuk `app.js` dijalankan di
+`node smoke-all.mjs` - 165 cek fitur untuk langkah 1-7, termasuk `app.js` dijalankan di
 DOM shim (submit sukses/gagal, riwayat, clear) dan blok `.env` milik `install.sh`
 dieksekusi di direktori sementara. Jaringan hanya dipakai saat guard-nya sendiri yang
 diuji (DNS, TLS, redirect hop, analisa live example.com); sisanya injeksi dependency atau

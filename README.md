@@ -107,7 +107,7 @@ Fase 1, 7 of 8 steps done. Engine, server, install tooling, and the full fronten
 
 The adapter has been verified running locally but has never been installed on a VM. `install.sh` and the frontend are written to spec but unexercised end-to-end: no tunnel, no Pages project, nothing live.
 
-Two scripts cover the whole chain locally, no VM required: `node smoke-e2e.mjs` (steps 1-6 in one pass, 25 checks) and `node smoke-all.mjs` (every feature of steps 1-7, 162 checks). They touch the live network only where the guard itself is under test; everything else runs on injected dependencies or a local server.
+Two scripts cover the whole chain locally, no VM required: `node smoke-e2e.mjs` (steps 1-6 in one pass, 25 checks) and `node smoke-all.mjs` (every feature of steps 1-7, 165 checks). They touch the live network only where the guard itself is under test; everything else runs on injected dependencies or a local server.
 
 ## MVP scope
 

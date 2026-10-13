@@ -27,12 +27,17 @@ export const DENYLIST_CIDRS = [
   'fc00::/7', // unique local
 ];
 
+// Octets must be canonical decimal — no leading zeros. node:net rejects
+// '010.0.0.1' outright and this mirrors it so the two guards answer identically
+// on the non-canonical forms their exports can be handed. Neither guard ever
+// sees one through validateUrl: WHATWG canonicalises the host first, and it reads
+// 010 as octal anyway.
 function parseIPv4(ip) {
   const parts = ip.split('.');
   if (parts.length !== 4) return null;
   const bytes = new Uint8Array(4);
   for (let i = 0; i < 4; i++) {
-    if (!/^\d{1,3}$/.test(parts[i])) return null;
+    if (!/^(0|[1-9]\d{0,2})$/.test(parts[i])) return null;
     const n = Number(parts[i]);
     if (n > 255) return null;
     bytes[i] = n;
