@@ -584,7 +584,7 @@ status, body rusak); `frontend/test/health.test.js` mengunci respons health yang
 (401 yang di-remap ke 502, kontrak tidak melebar, evidence standard pada temuan).
 
 **Smoke lokal (tanpa VM):** `node smoke-e2e.mjs` — rantai langkah 1-6, 25 cek.
-`node smoke-all.mjs` - 165 cek fitur untuk langkah 1-7, termasuk `app.js` dijalankan di
+`node smoke-all.mjs` - 168 cek fitur untuk langkah 1-7, termasuk `app.js` dijalankan di
 DOM shim (submit sukses/gagal, riwayat, clear) dan blok `.env` milik `install.sh`
 dieksekusi di direktori sementara. Jaringan hanya dipakai saat guard-nya sendiri yang
 diuji (DNS, TLS, redirect hop, analisa live example.com); sisanya injeksi dependency atau
@@ -684,6 +684,22 @@ cloudflared tunnel run rea-vm --url http://localhost:8787
 2. Buka https://reascan.pages.dev → paste URL nyata → Analyze → findings render
 3. localStorage history muncul setelah analisa pertama
 4. Semua hijau = deployment sukses, nol bentrok
+
+### 10.7 Di mana kegagalan terlihat
+
+Sengaja tidak ada `console.*` di path produksi (DESIGN §3.6, ditegakkan check). Konsekuensinya: kegagalan
+tidak muncul di UI selain sebagai pesan error bagi pengguna. Dua jalur yang ada — dicatat di sini karena
+belum pernah didokumentasikan dan step 8 akan membutuhkannya:
+
+| Gejala | Di mana dilihat |
+|---|---|
+| 502 "analysis engine unreachable" | `wrangler pages deployment tail` (edge, real-time, gratis) |
+| Adapter mati / crash loop | `journalctl -u reascan-adapter -f` (systemd, sudah ada) |
+| Tunnel putus / hostname berubah | `journalctl -u reascan-tunnel -f` |
+| Penyebab spesifik per permintaan | `verdict.limitations` di UI — kegagalan fetch target memang dilaporkan ke pengguna, bukan ke log |
+
+Kalau nanti butuh retensi: Logpush ke R2 (butuh Workers paid) atau D1 job log (fase 2).
+MVP tidak butuh keduanya — DOM hanya melaporkan apa yang bisa dijawab, dan sisanya ada di dua jalur di atas.
 
 ---
 

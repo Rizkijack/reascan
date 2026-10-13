@@ -641,6 +641,31 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   els['clear-history'].fire('click');
   check('clear history empties storage and hides the panel', store.get('reascan:history') === undefined && els['history-section'].hidden === true);
 
+  // A 200 carrying {status:'done'} with no findings is a contract breach. It used
+  // to reach saveToHistory(), throw on findings.url, and surface as "could not
+  // reach the analyzer" — blaming the network for a server that answered wrongly.
+  fetchImpl = async () => ({ status: 200, json: async () => ({ status: 'done' }) });
+  form.fire('submit');
+  await new Promise((r) => setTimeout(r, 10));
+  check('done-without-findings reads as a contract error, not a network error',
+    els['status'].className.includes('error')
+      && /no findings/.test(els['status'].textContent)
+      && !/could not reach/.test(els['status'].textContent),
+    els['status'].textContent.slice(0, 80));
+
+  // Storage refusing the write must not be swallowed: the list would simply stop
+  // growing and the user would have no way to tell why.
+  const realSetItem = globalThis.localStorage.setItem;
+  globalThis.localStorage.setItem = () => { throw new Error('QuotaExceededError'); };
+  fetchImpl = async () => ({ status: 200, json: async () => ({ status: 'done', findings: FINDINGS }) });
+  form.fire('submit');
+  await new Promise((r) => setTimeout(r, 10));
+  check('a storage refusal is surfaced in the history panel',
+    /too large|kept the newest/.test(els['history-list'].textContent),
+    els['history-list'].textContent.slice(0, 90));
+  check('the report still renders when history cannot be written', els['results'].hidden === false);
+  globalThis.localStorage.setItem = realSetItem;
+
   // Hand the real globals back before anything else runs.
   globalThis.fetch = realFetch;
   globalThis.document = realDocument;

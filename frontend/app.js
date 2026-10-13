@@ -30,6 +30,10 @@ function loadHistory() {
   }
 }
 
+// Set when a report could not be stored, so renderHistory can say so instead of
+// the list quietly failing to grow.
+let historyNotice = '';
+
 function saveToHistory(findings) {
   const history = loadHistory();
   history.unshift({
@@ -39,11 +43,32 @@ function saveToHistory(findings) {
     findings,
   });
   if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-  } catch {
-    // Quota exceeded or storage disabled — analysis results still render.
+
+  // localStorage is about 5MB and a heavy report is tens of KB (endpoints and
+  // per-bundle detail dominate), so the quota is genuinely reachable at 50
+  // entries. onQuotaExceededError is not available everywhere, so this is driven
+  // by the throw rather than a precomputed size.
+  //
+  // A failed setItem leaves the previous value untouched, which is what makes
+  // trimming safe here: the worst case is an older, smaller history still intact.
+  historyNotice = '';
+  let candidate = history;
+  for (;;) {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(candidate));
+      if (candidate.length < history.length) {
+        historyNotice = `kept the newest ${candidate.length} analyses — the rest no longer fit in this browser's storage`;
+      }
+      break;
+    } catch {
+      if (candidate.length <= 1) {
+        historyNotice = 'this report is too large to keep in this browser, so history was left as it was';
+        break;
+      }
+      candidate = candidate.slice(0, Math.max(1, Math.floor(candidate.length / 2)));
+    }
   }
+
   renderHistory();
 }
 
@@ -53,7 +78,11 @@ function renderHistory() {
   const history = loadHistory();
 
   list.textContent = '';
-  section.hidden = history.length === 0;
+  section.hidden = history.length === 0 && !historyNotice;
+
+  if (historyNotice) {
+    list.append(el('li', 'history-notice', historyNotice));
+  }
 
   for (const entry of history) {
     const li = document.createElement('li');
@@ -282,6 +311,13 @@ async function handleSubmit(e) {
     if (data.status !== 'done') {
       state.phase = 'error';
       state.error = data.error ?? `analysis failed (${res.status})`;
+    } else if (!data.findings || typeof data.findings !== 'object') {
+      // {status:'done'} with no findings is a contract breach, not a transport
+      // problem. Letting it reach saveToHistory() threw on findings.url and
+      // surfaced as "could not reach the analyzer", blaming the network for a
+      // server that answered wrongly.
+      state.phase = 'error';
+      state.error = 'the analyzer returned a completed result with no findings';
     } else {
       state.phase = 'done';
       state.findings = data.findings;
@@ -305,6 +341,7 @@ $('clear-history').addEventListener('click', () => {
   } catch {
     // storage disabled — list simply re-renders from the same empty source
   }
+  historyNotice = '';
   renderHistory();
 });
 
