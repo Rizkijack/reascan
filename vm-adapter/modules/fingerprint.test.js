@@ -189,3 +189,10 @@ test('body reads are capped so a target cannot stream unbounded data in', async 
   // The cap only bounds memory; the finding must still complete rather than throw.
   assert.ok(Array.isArray(f.findings));
 });
+
+// When the cap fires, markers further down the document were never in scope, so
+// saying nothing would present a partial scan as a complete one.
+test('a truncated body is disclosed as a limitation', async () => {
+  const f = await fingerprint('https://example.com/', mockSafeFetch('a'.repeat(2 * 1024 * 1024)), stubTls(TLS_FIXTURE));
+  assert.match(f.limitations.join(' '), /truncated at 524288 bytes/);
+});

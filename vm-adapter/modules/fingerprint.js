@@ -4,13 +4,11 @@
 // observation; a framework guessed from an HTML marker is a derivation. Nothing
 // here infers secrecy from names — see AGENTS.md.
 //
-// safeFetch is injected rather than imported so tests drive this module without
-// touching the network, and so the module cannot reach the network by accident.
-
 // safeFetch and probeTls are injected so tests drive this module without touching
 // the network. Defaults keep the DESIGN.md 3.6 two-argument call working, and both
 // defaults are urlGuard functions — no path here reaches a socket unguarded.
 import { safeTlsInfo } from '../lib/urlGuard.js';
+import { readCapped } from '../lib/body.js';
 
 // Enough of the document to catch framework markers. A larger body costs memory
 // and buys nothing; markers live in the first screen of markup.
@@ -76,24 +74,6 @@ function detectFramework(html, poweredBy) {
 }
 
 // Cap the read so a target cannot stream an unbounded body into the adapter.
-async function readCapped(response, maxBytes) {
-  if (!response.body) return '';
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.length;
-    chunks.push(value);
-    if (total >= maxBytes) {
-      await reader.cancel();
-      break;
-    }
-  }
-  return Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8');
-}
-
 export async function fingerprint(url, safeFetch, probeTls = safeTlsInfo) {
   const findings = [];
   const limitations = [];
@@ -121,7 +101,13 @@ export async function fingerprint(url, safeFetch, probeTls = safeTlsInfo) {
 
   let html = '';
   try {
-    html = await readCapped(response, MAX_HTML_BYTES);
+    const body = await readCapped(response, MAX_HTML_BYTES);
+    html = body.text;
+    if (body.truncated) {
+      // The marker scan below only saw the first chunk of the document, so a
+      // framework placed further down was never in scope.
+      limitations.push(`response body truncated at ${MAX_HTML_BYTES} bytes; framework markers below that point were not checked`);
+    }
   } catch (err) {
     limitations.push(`could not read response body: ${err.message}`);
   }

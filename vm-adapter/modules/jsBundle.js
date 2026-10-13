@@ -10,6 +10,8 @@
 // from names or text patterns. Endpoints are reported as strings that appear in
 // the code, nothing more.
 
+import { readCapped } from '../lib/body.js';
+
 const DEFAULT_LIMITS = {
   maxBundles: 40,
   maxBytes: 1048576,
@@ -39,31 +41,6 @@ const OBFUSCATION_SIGNALS = [
   { name: 'packer signature', re: /eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e/ },
   { name: 'base64 blob', re: /["'`][A-Za-z0-9+/]{200,}={0,2}["'`]/ },
 ];
-
-// Cap the read so a hostile bundle cannot stream unbounded data into the adapter.
-async function readCapped(response, maxBytes) {
-  if (!response.body) return { text: '', bytes: 0, truncated: false };
-  const reader = response.body.getReader();
-  const chunks = [];
-  let bytes = 0;
-  let truncated = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    bytes += value.length;
-    chunks.push(value);
-    if (bytes >= maxBytes) {
-      truncated = true;
-      await reader.cancel();
-      break;
-    }
-  }
-  return {
-    text: Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8'),
-    bytes: Math.min(bytes, maxBytes),
-    truncated,
-  };
-}
 
 function extractScripts(html, baseUrl) {
   const found = [];
