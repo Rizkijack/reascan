@@ -219,6 +219,15 @@ function renderBundles(bundles) {
     ].filter(Boolean);
     card.append(el('div', 'meta', flags.join(' · ')));
 
+    // The backend reports WHICH signals fired, not just a boolean — the signals
+    // are the evidence behind the "obfuscated" derivation (evidence standard:
+    // a claim without its evidence is not a finding).
+    if (b.obfuscated && b.obfuscation_signals?.length) {
+      const sigs = el('div', 'signals');
+      for (const s of b.obfuscation_signals) sigs.append(el('code', null, String(s)));
+      card.append(sigs);
+    }
+
     if (b.endpoints?.length) {
       const eps = el('div', 'endpoints');
       for (const ep of b.endpoints) eps.append(el('code', null, String(ep)));
@@ -263,6 +272,18 @@ function renderBrowserCapture(cap) {
     ['page errors', ev.pageError],
   ].filter(([, v]) => v != null && v > 0).map(([k, v]) => `${v} ${k}`);
   if (summary.length) wrap.append(el('div', 'meta', el('span', null, summary.join(' · '))));
+
+  // Resource-type breakdown the capture distils (script N · stylesheet N …).
+  // Same reason as the event summary: what the page spent its requests on is
+  // evidence the backend already collected — dropping it here loses it.
+  const rt = cap.resource_types;
+  if (rt && typeof rt === 'object') {
+    const parts = Object.entries(rt)
+      .filter(([, v]) => typeof v === 'number' && v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${v} ${k}`);
+    if (parts.length) wrap.append(el('div', 'meta', el('span', null, `resource types: ${parts.join(' · ')}`)));
+  }
 
   if (cap.failed_requests?.length) {
     wrap.append(el('h4', null, `Failed requests (${cap.failed_requests.length})`));

@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { createAdapter } from './server.js';
+import { createAdapter, reaOutcome } from './server.js';
+import { _resetBinaryCache } from './lib/reaCli.js';
 
 const KEY = 'test-key-0123456789abcdef';
 
@@ -160,4 +164,85 @@ test('unknown categories produce a low-confidence report rather than an error', 
     assert.equal(body.findings.verdict.confidence, 'low');
     assert.deepEqual(body.findings.fingerprint.findings, []);
   });
+});
+
+// The fixture is a POSIX shell script and reaCli spawns without a shell, so it
+// cannot run on Windows — same reasoning as reaCli.test.js. These run on the VM,
+// which is where `rea` lives.
+const needsPosix = process.platform === 'win32'
+  ? { skip: 'fixture is a POSIX shell script; Windows spawn cannot execute it' }
+  : {};
+
+// The REA deep-analysis envelope, distilled by distilJsAnalysis, carries its own
+// limitations array. server.js must hoist those into verdict.limitations and
+// strip them from the section payload — the same shape fingerprint and js_bundles
+// ship. Before the fix the array was dropped on the floor: the engine's own
+// "could not parse bundle N" never reached the reader, which is exactly the
+// silent drop AGENTS.md forbids.
+//
+// The unit cases below pin reaOutcome directly (offline, any platform); the
+// end-to-end case drives the same logic through HTTP with a fake rea binary.
+test('reaOutcome hoists limitations and strips them from the payload', () => {
+  const capture = reaOutcome({
+    ok: true,
+    capture: {
+      final_url: 'https://example.com/',
+      screenshot: 'data:image/png;base64,AAAA',
+      limitations: ['screenshot step failed on step 2', 42],
+    },
+  });
+  assert.deepEqual(capture.limitations, ['screenshot step failed on step 2', '42']);
+  assert.equal(capture.data.limitations, undefined);
+  assert.equal(capture.data.final_url, 'https://example.com/');
+  assert.equal(capture.data.screenshot, 'data:image/png;base64,AAAA');
+
+  const analysis = reaOutcome({
+    ok: true,
+    analysis: { modules: 7, parse_failures: 1, limitations: ['could not parse bundle-3.js'] },
+  });
+  assert.deepEqual(analysis.limitations, ['could not parse bundle-3.js']);
+  assert.equal(analysis.data.limitations, undefined);
+  assert.equal(analysis.data.modules, 7);
+
+  // No limitations at all: payload passes through untouched, task is clean.
+  const clean = reaOutcome({ ok: true, capture: { final_url: 'https://example.com/' } });
+  assert.deepEqual(clean.limitations, []);
+  assert.equal(clean.data.final_url, 'https://example.com/');
+
+  // Neither capture nor analysis (ok:true with no payload) degrades to null.
+  assert.deepEqual(reaOutcome({ ok: true }), { data: null, limitations: [] });
+});
+
+test('REA limitations reach the verdict and stay out of the section payload', needsPosix, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'reascan-fake-rea-'));
+  const bin = join(dir, 'rea');
+  await writeFile(bin, '#!/bin/sh\n'
+    + 'echo \'{"normalized_result":{"statistics":{"modules":7,"findings":2,"visited_ast_nodes":99,"parse_failures":1},'
+    + '"semantic_graph":{"coverage":{"status":"partial"},"unknowns":[]},'
+    + '"limitations":["engine could not parse bundle-3.js"]},"confidence":"derived\'}\'');
+  await chmod(bin, 0o755);
+
+  const prev = process.env.REA_BIN;
+  process.env.REA_BIN = bin;
+  _resetBinaryCache();
+  try {
+    await withServer({}, async (call) => {
+      const r = await call('/analyze', authed({ url: 'https://example.com/', categories: ['jsDeep'] }));
+      assert.equal(r.status, 200);
+      const { findings } = await r.json();
+
+      assert.ok(findings.verdict.limitations.includes('engine could not parse bundle-3.js'),
+        `expected the engine limitation in the verdict, got ${JSON.stringify(findings.verdict.limitations)}`);
+
+      // The section keeps its data; the limitations field is the verdict's job.
+      assert.equal(findings.js_deep.limitations, undefined);
+      assert.equal(findings.js_deep.modules, 7);
+      assert.equal(findings.js_deep.coverage_status, 'partial');
+      assert.equal(findings.js_deep.parse_failures, 1);
+    });
+  } finally {
+    if (prev === undefined) delete process.env.REA_BIN;
+    else process.env.REA_BIN = prev;
+    _resetBinaryCache();
+  }
 });

@@ -584,6 +584,10 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
       }
     }
     addEventListener(type, fn) { (this.handlers[type] ??= []).push(fn); }
+    // app.js's el() detects a child node via appendChild — the real DOM has it,
+    // so the shim must too, or passing a node as el()'s third argument silently
+    // degrades to "[object Object]" and the nested text never reaches textContent.
+    appendChild(n) { this.append(n); return n; }
     scrollIntoView() {}
     fire(type, event = {}) { for (const fn of this.handlers[type] ?? []) fn({ preventDefault() {}, ...event }); }
     get all() { return this.children.flatMap((c) => [c, ...c.all]); }
@@ -630,8 +634,39 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
     url: 'https://example.com/',
     timestamp: '2026-10-13T12:00:00.000Z',
     fingerprint: { findings: [{ key: 'server', value: 'nginx', type: 'observation', evidence: 'Server header', confidence: 'high' }], cdn: null, tls: { issuer: 'Test CA', expiry: '2030' } },
-    js_bundles: [{ src: 'https://example.com/app.js', size_kb: 12.3, sourcemap: true, endpoints: ['/api/v1/users'], obfuscated: false }],
-    verdict: { confidence: 'medium', limitations: ['CDN hides the origin'], unknowns: ['Does /api/v1/users need auth'] },
+    js_bundles: [
+      { src: 'https://example.com/app.js', size_kb: 12.3, sourcemap: true, endpoints: ['/api/v1/users'], obfuscated: false },
+      // Obfuscated bundle carrying its evidence signals — renderBundles must
+      // surface them, not just the boolean flag (the signals ARE the evidence).
+      { src: 'https://example.com/legacy.js', size_kb: 4.2, sourcemap: false, endpoints: [], obfuscated: true, obfuscation_signals: ['eval(atob(', 'packer signature'] },
+    ],
+    // REA sections exactly as server.js ships them: limitations hoisted to the
+    // verdict, so the section payload carries data only.
+    browser_capture: {
+      final_url: 'https://example.com/',
+      duration_ms: 5200,
+      confidence: 'observed',
+      screenshot: 'data:image/png;base64,AAAA',
+      events: { request: 12, response: 11, failed: 1, console: 2, pageError: 0 },
+      resource_types: { script: 5, stylesheet: 3, document: 1 },
+      failed_requests: [{ url: 'https://cdn.test/x.js', failure: 'net::ERR_FAILED' }],
+      page_errors: ['Uncaught ReferenceError: x is not defined'],
+    },
+    js_deep: {
+      files_analysed: 4,
+      modules: 120,
+      findings: 3,
+      ast_nodes_visited: 8400,
+      parse_failures: 1,
+      coverage_status: 'partial',
+      unknowns: ['Module graph crosses into an unloaded chunk'],
+      confidence: 'derived',
+    },
+    verdict: {
+      confidence: 'medium',
+      limitations: ['CDN hides the origin', 'browser.capture: screenshot step failed on step 2'],
+      unknowns: ['Does /api/v1/users need auth'],
+    },
   };
 
   await import('./frontend/app.js');
@@ -653,8 +688,34 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   // Limitations/unknowns are part of the verdict block, not the findings body.
   const verdictText = els['verdict'].textContent;
   check('limitations and unknowns are shown', verdictText.includes('CDN hides the origin') && verdictText.includes('Does /api/v1/users need auth'), verdictText.slice(0, 80));
-  check('limitation/unknown counts are labelled', /Limitations \(1\)/.test(verdictText) && /Unknowns \(1\)/.test(verdictText));
+  check('limitation/unknown counts are labelled', /Limitations \(2\)/.test(verdictText) && /Unknowns \(1\)/.test(verdictText));
   check('bundle endpoints are rendered', els['findings-body'].textContent.includes('/api/v1/users'));
+
+  // REA sections must render from the same payload the adapter ships — these
+  // two sections previously had zero DOM coverage, so a renderer that silently
+  // returned nothing would have passed.
+  const bodyText = els['findings-body'].textContent;
+  check('browser capture section renders with its screenshot',
+    bodyText.includes('Browser capture (REA)') && els['findings-body'].all.some((e) => e.tagName === 'IMG'));
+  check('capture event counts and final URL are shown',
+    bodyText.includes('12 requests') && bodyText.includes('final URL https://example.com/'));
+  check('resource-type breakdown is rendered', bodyText.includes('resource types: 5 script · 3 stylesheet · 1 document'), bodyText.slice(0, 200));
+  check('failed requests and page errors are listed',
+    bodyText.includes('net::ERR_FAILED') && bodyText.includes('Uncaught ReferenceError'));
+  check('js deep analysis section renders its stats',
+    bodyText.includes('JS deep analysis (REA)') && bodyText.includes('4 files') && bodyText.includes('coverage partial'));
+  check('js deep unknowns are listed', bodyText.includes('Module graph crosses into an unloaded chunk'));
+
+  // The obfuscation signals are the evidence behind the "obfuscated"
+  // derivation — the boolean alone is a claim without its evidence.
+  check('obfuscation signals are rendered next to the flag',
+    bodyText.includes('eval(atob(') && bodyText.includes('packer signature'));
+  check('style.css styles the signals chips', /\.signals\s*\{/.test(readFileSync('frontend/style.css', 'utf8')));
+
+  // The REA limitation travels through the verdict like every other one.
+  check('REA limitations reach the verdict block',
+    /Limitations \(2\)/.test(verdictText) && verdictText.includes('browser.capture: screenshot step failed'), verdictText.slice(0, 120));
+
   check('history saved to localStorage', JSON.parse(store.get('reascan:history') ?? '[]').length === 1);
   check('history list is visible with one entry', els['history-section'].hidden === false && els['history-list'].children.length === 1);
 

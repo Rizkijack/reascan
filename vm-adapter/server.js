@@ -63,6 +63,21 @@ function send(res, status, payload) {
   res.end(body);
 }
 
+// Turn a successful {ok:true, capture|analysis} REA answer into the task shape
+// the rest of handleAnalyze consumes. Exported so node --test can pin the
+// hoisting without spawning a browser or the rea binary.
+//
+// distilCapture/distilJsAnalysis carry their own limitations (a failed
+// screenshot step, a bundle the engine could not parse). Hoisting them into the
+// task result is what lands them in verdict.limitations — silently discarding
+// them would break the "never drop a limitation" rule in AGENTS.md. The field
+// is then stripped from the payload, the same shape fingerprint and js_bundles
+// already ship: findings only in the section, limitations only in the verdict.
+export function reaOutcome(result) {
+  const { limitations = [], ...data } = result.capture ?? result.analysis ?? {};
+  return { data: Object.keys(data).length ? data : null, limitations: limitations.map(String) };
+}
+
 async function readBody(req) {
   const chunks = [];
   let size = 0;
@@ -118,7 +133,7 @@ async function handleAnalyze(req, res, env) {
         safeFetch,
         timeoutMs: REQUEST_TIMEOUT_MS - 5000,
       });
-      if (result.ok) return { data: result.capture ?? result.analysis ?? null, limitations: [] };
+      if (result.ok) return reaOutcome(result);
       return { ...emptyRea, limitations: [`${tool}: ${result.reason}`] };
     } catch (e) {
       return { ...emptyRea, limitations: [`${tool} aborted: ${e.message}`] };
