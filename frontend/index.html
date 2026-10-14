@@ -5,63 +5,121 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>reascan — web stack &amp; JS bundle analysis</title>
   <meta name="description" content="Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle inventory, confidence with explicit limitations and unknowns." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="tokens.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="/">reascan</a>
-    <span class="tagline">evidence, not scores</span>
+    <div class="container header-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">◈</span>
+        reascan
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="#analyze" class="nav-link is-active">Analyze</a>
+        <a href="#results" class="nav-link">Findings</a>
+        <a href="https://github.com/Rizkijack/reascan" class="nav-link" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+      <span class="tagline">evidence, not scores</span>
+    </div>
   </header>
 
   <main>
-    <section class="panel" aria-labelledby="form-heading">
-      <h1 id="form-heading">Analyze a URL</h1>
-      <form id="analyze-form" novalidate>
-        <label for="target-url" class="sr-only">Target URL</label>
-        <div class="form-row">
-          <input
-            id="target-url"
-            name="url"
-            type="url"
-            inputmode="url"
-            placeholder="https://example.com"
-            autocomplete="off"
-            spellcheck="false"
-            required
-          />
-          <button type="submit" id="analyze-btn">Analyze</button>
+    <section class="hero" aria-labelledby="hero-heading">
+      <div class="container hero-inner">
+        <p class="eyebrow">Web stack &amp; JS bundle analysis</p>
+        <h1 id="hero-heading">Evidence, not scores.</h1>
+        <p class="lede">
+          Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle
+          inventory, browser capture, and deep static analysis — with explicit
+          limitations and unknowns.
+        </p>
+        <div class="hero-ctas">
+          <a href="#analyze" class="btn btn-primary">Analyze a URL</a>
+          <a href="https://github.com/Rizkijack/reascan" class="btn btn-secondary" target="_blank" rel="noopener">Star on GitHub</a>
         </div>
-
-        <fieldset class="categories">
-          <legend>Categories</legend>
-          <label><input type="checkbox" name="category" value="fingerprint" checked /> Fingerprint</label>
-          <label><input type="checkbox" name="category" value="jsBundle" checked /> JS Bundles</label>
-          <label><input type="checkbox" name="category" value="browserCapture" /> Browser capture <span class="tag">REA</span></label>
-          <label><input type="checkbox" name="category" value="jsDeep" /> JS deep analysis <span class="tag">REA</span></label>
-        </fieldset>
-      </form>
-      <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+        <ul class="hero-points" aria-label="Analysis categories">
+          <li>Fingerprint</li>
+          <li>JS bundles</li>
+          <li>Browser capture</li>
+          <li>Deep analysis</li>
+        </ul>
+      </div>
     </section>
 
-    <section id="history-section" class="panel" aria-labelledby="history-heading" hidden>
-      <h2 id="history-heading">History <button type="button" id="clear-history" class="link-btn">clear</button></h2>
-      <ul id="history-list" class="history"></ul>
-    </section>
+    <div class="container">
+      <section class="panel card reveal" id="analyze" aria-labelledby="form-heading">
+        <h2 id="form-heading">Analyze a URL</h2>
+        <form id="analyze-form" novalidate>
+          <label for="target-url" class="sr-only">Target URL</label>
+          <div class="form-row">
+            <input
+              id="target-url"
+              name="url"
+              type="url"
+              inputmode="url"
+              placeholder="https://example.com"
+              autocomplete="off"
+              spellcheck="false"
+              required
+            />
+            <button type="submit" id="analyze-btn" class="btn btn-primary">Analyze</button>
+          </div>
 
-    <section id="results" class="panel" aria-labelledby="results-heading" hidden>
-      <h2 id="results-heading">Findings</h2>
-      <div id="verdict" class="verdict"></div>
-      <div id="findings-body"></div>
-    </section>
+          <fieldset class="categories">
+            <legend>Categories</legend>
+            <label class="check"><input type="checkbox" name="category" value="fingerprint" checked /> <span>Fingerprint</span></label>
+            <label class="check"><input type="checkbox" name="category" value="jsBundle" checked /> <span>JS Bundles</span></label>
+            <label class="check"><input type="checkbox" name="category" value="browserCapture" /> <span>Browser capture <span class="tag">REA</span></span></label>
+            <label class="check"><input type="checkbox" name="category" value="jsDeep" /> <span>JS deep analysis <span class="tag">REA</span></span></label>
+          </fieldset>
+        </form>
+        <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+      </section>
+
+      <section id="history-section" class="panel card reveal" aria-labelledby="history-heading" hidden>
+        <h2 id="history-heading">History <button type="button" id="clear-history" class="link-btn">clear</button></h2>
+        <ul id="history-list" class="history"></ul>
+      </section>
+
+      <section id="results" class="panel card reveal" aria-labelledby="results-heading" hidden>
+        <h2 id="results-heading">Findings</h2>
+        <div id="verdict" class="verdict"></div>
+        <div id="findings-body"></div>
+      </section>
+    </div>
   </main>
 
   <footer class="site-footer">
-    <p>
-      Every fetch to your target is guarded against private-network addresses at two layers.
-      Secret-pattern detection is intentionally not performed — this report never displays secret values.
-    </p>
+    <div class="container footer-inner">
+      <p>
+        Every fetch to your target is guarded against private-network addresses at two layers.
+        Secret-pattern detection is intentionally not performed — this report never displays secret values.
+      </p>
+      <p class="footer-links">
+        <a href="https://github.com/Rizkijack/reascan" target="_blank" rel="noopener">GitHub</a>
+      </p>
+    </div>
   </footer>
 
   <script type="module" src="app.js"></script>
+  <script>
+    // Gentle fade/slide-in on scroll. Respects prefers-reduced-motion.
+    (() => {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) { e.target.classList.add('is-visible'); io.unobserve(e.target); }
+        }
+      }, { threshold: 0.08 });
+      document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+    })();
+  </script>
 </body>
 </html>
