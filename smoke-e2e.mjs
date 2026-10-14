@@ -16,7 +16,7 @@ import { createAdapter } from './vm-adapter/server.js';
 import { validateUrl, safeFetch, isDeniedIp } from './vm-adapter/lib/urlGuard.js';
 import { fingerprint } from './vm-adapter/modules/fingerprint.js';
 import { analyzeBundles } from './vm-adapter/modules/jsBundle.js';
-import { onRequestPost } from './frontend/functions/api/analyze.js';
+import { onRequestPost } from './functions/api/analyze.js';
 
 const KEY = 'smoke-test-key-0123456789abcdef';
 const TARGET = 'https://example.com/';

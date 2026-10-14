@@ -26,8 +26,8 @@ import { fingerprint } from './vm-adapter/modules/fingerprint.js';
 import { analyzeBundles } from './vm-adapter/modules/jsBundle.js';
 import { createAdapter } from './vm-adapter/server.js';
 import { callReaTool, REA_MCP_ENABLED, REA_TOOLS } from './vm-adapter/lib/reaMcp.js';
-import { onRequestPost, validateUrl as edgeValidateUrl, DENYLIST_CIDRS as EDGE_CIDRS, normalizeAddresses } from './frontend/functions/api/analyze.js';
-import { onRequestGet as healthGet } from './frontend/functions/api/health.js';
+import { onRequestPost, validateUrl as edgeValidateUrl, DENYLIST_CIDRS as EDGE_CIDRS, normalizeAddresses } from './functions/api/analyze.js';
+import { onRequestGet as healthGet } from './functions/api/health.js';
 
 // ---------------------------------------------------------------- harness
 let total = 0;
@@ -326,7 +326,20 @@ try {
   check('correct key -> 200', (await fetch(`${base}/health`, { headers: { 'x-api-key': KEY } })).status === 200);
 
   group('routing');
-  check('/health shape', JSON.stringify(await (await fetch(`${base}/health`, { headers: { 'x-api-key': KEY } })).json()) === '{"status":"ok","tools_available":["fingerprint","jsBundle"]}');
+  // Deliberately structural rather than a pinned literal: the capability list grows
+  // whenever an adapter gains a mode, and pinning the exact array turns every such
+  // addition into a test edit — which is how a contract test becomes a rubber stamp.
+  // (This check was a literal, and that is exactly why it broke on the REA wiring.)
+  const health = await (await fetch(`${base}/health`, { headers: { 'x-api-key': KEY } })).json();
+  check('/health reports ok', health.status === 'ok');
+  check('/health advertises every base capability',
+    ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'].every((t) => health.tools_available.includes(t)),
+    JSON.stringify(health.tools_available));
+  // rea_tools must be read from the module, not kept as a second hardcoded copy in
+  // server.js — this is the one place an operator sees what the VM can serve.
+  check('/health echoes the live REA catalogue',
+    JSON.stringify(health.rea_tools) === JSON.stringify(REA_TOOLS),
+    JSON.stringify(health.rea_tools));
   check('unknown path -> 404', (await fetch(`${base}/nope`, { headers: { 'x-api-key': KEY } })).status === 404);
   check('wrong method -> 404', (await fetch(`${base}/analyze`, { headers: { 'x-api-key': KEY } })).status === 404);
 
@@ -476,12 +489,20 @@ group('.env.example');
   }
 }
 
-group('reaMcp.js (phase-2 stub)');
+group('reaMcp.js (phase-2 integration)');
 {
-  check('stays disabled', REA_MCP_ENABLED === false);
-  check('declares the expected tool set', REA_TOOLS.includes('asar.extract') && REA_TOOLS.includes('ghidra.analyzeHeadless') && REA_TOOLS.includes('apktool.decode'));
-  const r = await callReaTool('asar.extract', {});
-  check('fails visibly instead of pretending', r.ok === false && /phase 2/.test(r.reason));
+  // Previously a stub; the engine is wired now. The invariant that still matters is
+  // that what the integration *advertises* matches what it can *dispatch* — a
+  // declared-but-unknown tool would be an operator-visible lie on /health.
+  check('the REA integration is live, not a stub', REA_MCP_ENABLED === true);
+  check('declares the expected tool set', REA_TOOLS.length === 2 && REA_TOOLS.includes('browser.capture') && REA_TOOLS.includes('js.analyzeDeep'), REA_TOOLS.join(','));
+  // Called without a url on purpose: the guard short-circuits before any dispatch,
+  // so this proves the case is recognised without launching a browser.
+  const known = await Promise.all(REA_TOOLS.map((t) => callReaTool(t, {})));
+  check('every declared tool is known to the dispatcher', known.every((r) => r.ok === false && !/unknown REA tool/.test(r.reason)), JSON.stringify(known.map((r) => r.reason)));
+  const r = await callReaTool('asar.extract', { url: 'https://example.com/' });
+  check('an engine-less category fails visibly instead of pretending', r.ok === false && /not installed on this VM/.test(r.reason), r.reason);
+  check('an unknown tool is rejected, not silently accepted', (await callReaTool('nope', { url: 'https://example.com/' })).ok === false);
 }
 
 // ================================================================ STEP 6
@@ -706,7 +727,7 @@ group('security invariants');
   const files = [
     'vm-adapter/server.js', 'vm-adapter/lib/urlGuard.js', 'vm-adapter/lib/body.js', 'vm-adapter/lib/reaMcp.js',
     'vm-adapter/modules/fingerprint.js', 'vm-adapter/modules/jsBundle.js',
-    'frontend/functions/api/analyze.js', 'frontend/functions/api/health.js', 'frontend/app.js',
+    'functions/api/analyze.js', 'functions/api/health.js', 'frontend/app.js',
   ];
   const src = Object.fromEntries(files.map((f) => [f, readFileSync(f, 'utf8')]));
 
@@ -718,7 +739,7 @@ group('security invariants');
   check('urlGuard is the only adapter file calling fetch()', rawFetch.every((f) => f.endsWith('urlGuard.js')), rawFetch.join(','));
   check('analysis modules never call fetch() themselves', !rawFetch.some((f) => f.includes('/modules/')), rawFetch.join(','));
 
-  const edgeFetches = [...src['frontend/functions/api/analyze.js'].matchAll(/(^|[^A-Za-z])fetch\(([^\n]*)/g)].map((m) => m[2].trim());
+  const edgeFetches = [...src['functions/api/analyze.js'].matchAll(/(^|[^A-Za-z])fetch\(([^\n]*)/g)].map((m) => m[2].trim());
   check('the edge has exactly one fetch(), aimed at the configured engine', edgeFetches.length === 1 && /env\.VM_ADAPTER_URL/.test(edgeFetches[0]), edgeFetches.join(' | '));
 
   check("safeFetch keeps redirect: 'manual'", /redirect: 'manual'/.test(src['vm-adapter/lib/urlGuard.js']));

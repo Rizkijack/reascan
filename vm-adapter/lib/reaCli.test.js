@@ -25,13 +25,23 @@ function withFakeBin(script, fn) {
   })();
 }
 
+// The fixture below is a POSIX shell script. Windows CreateProcess does not honour
+// a shebang, and reaCli spawns without a shell, so the stand-in binary cannot be
+// executed there at all (ENOENT). The logic under test is platform-independent but
+// the fixture is not: these four run on the VM, which is where `rea` actually lives.
+// Skipped explicitly with a reason rather than deleted, so the coverage comes back
+// on any POSIX host and the gap is visible in the report instead of silent.
+const needsPosix = process.platform === 'win32'
+  ? { skip: 'fixture is a POSIX shell script; Windows spawn cannot execute it' }
+  : {};
+
 test('findReaBinary prefers REA_BIN', async () => {
   await withFakeBin('#!/bin/sh\necho {}', async () => {
     assert.match(findReaBinary(), /reascan-fakebin-/);
   });
 });
 
-test('runReaJson parses a single JSON object', async () => {
+test('runReaJson parses a single JSON object', needsPosix, async () => {
   await withFakeBin('#!/bin/sh\necho \'{"confidence":"observed"}\'', async () => {
     const result = await runReaJson(['whatever'], { timeoutMs: 5000 });
     assert.equal(result.ok, true);
@@ -39,7 +49,7 @@ test('runReaJson parses a single JSON object', async () => {
   });
 });
 
-test('runReaJson skips JSONL progress lines and takes the final envelope', async () => {
+test('runReaJson skips JSONL progress lines and takes the final envelope', needsPosix, async () => {
   const script = '#!/bin/sh\n'
     + 'echo \'{"rea_progress":{"phase":"x"}}\'\n'
     + 'echo \'{"normalized_result":{"steps":[]},"confidence":"derived"}\'';
@@ -50,7 +60,7 @@ test('runReaJson skips JSONL progress lines and takes the final envelope', async
   });
 });
 
-test('runReaJson reports unparseable output instead of throwing', async () => {
+test('runReaJson reports unparseable output instead of throwing', needsPosix, async () => {
   await withFakeBin('#!/bin/sh\necho "not json at all"\nexit 1', async () => {
     const result = await runReaJson(['whatever'], { timeoutMs: 5000 });
     assert.equal(result.ok, false);
@@ -73,7 +83,7 @@ test('runReaJson reports a missing binary instead of throwing', async () => {
   }
 });
 
-test('runReaJson times out instead of hanging', async () => {
+test('runReaJson times out instead of hanging', needsPosix, async () => {
   await withFakeBin('#!/bin/sh\nsleep 30', async () => {
     const result = await runReaJson(['whatever'], { timeoutMs: 1000 });
     assert.equal(result.ok, false);
