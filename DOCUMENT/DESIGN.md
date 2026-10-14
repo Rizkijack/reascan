@@ -75,7 +75,7 @@ findings JSON → Pages Function balas apa adanya → render di halaman
 
 ### 3.2 API + SSRF guard — Pages Functions (Workers runtime)
 
-**File:** `frontend/functions/api/analyze.js` (handler + SSRF guard inline; `validateUrl` di-export buat unit test). **MVP = pure proxy, nol DB** — D1 masuk fase 2 (async job storage).
+**File:** `functions/api/analyze.js` (handler + SSRF guard inline; `validateUrl` di-export buat unit test). **MVP = pure proxy, nol DB** — D1 masuk fase 2 (async job storage).
 
 **Deploy shape (penghindari bentrok):** Pages Functions hidup DI DALAM project Pages yang sama dengan frontend — satu folder, satu deploy (`wrangler pages deploy`), satu domain. Nol Worker terpisah, nol routing config, nol CORS. SSRF guard inline di analyze.js (MVP ~50 baris; split ke file terpisah kalau fase 2 butuh share dengan status/result).
 
@@ -327,7 +327,7 @@ function buildVerdict(findings, limitations) → {
 }
 ```
 
-### `frontend/functions/api/analyze.js` — Pages Function
+### `functions/api/analyze.js` — Pages Function
 
 ```js
 export async function onRequestPost(context) → Response
@@ -434,7 +434,7 @@ dan `jsBundle.js` masing-masing membawa salinan `readCapped`.
 jsBundle, server, reaMcp) dan 11 di `frontend/` (4 test: analyze, proxy, integration,
 health). Nol framework, nol build step, nol Docker.
 
-`frontend/test/` (bukan `frontend/functions/api/*.test.js`) karena Pages Functions
+`frontend/test/` (bukan `functions/api/*.test.js`) karena Pages Functions
 meng-compile setiap file di `functions/` jadi Worker route — file yang meng-import
 `node:test` di sana akan merusak deploy. Deviasi disengaja dari konvensi "test
 sebelahan modul" (AGENTS.md).

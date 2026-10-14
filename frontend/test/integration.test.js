@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { onRequestPost } from '../functions/api/analyze.js';
+import { onRequestPost } from '../../functions/api/analyze.js';
 import { createAdapter } from '../../vm-adapter/server.js';
 
 // Whole-tree contract test: the REAL Pages Function against the REAL adapter.

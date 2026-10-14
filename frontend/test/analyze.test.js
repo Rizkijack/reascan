@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 // compiles everything under functions/ into the Worker bundle, and a file
 // importing node:test would break the deploy. Deliberate deviation from the
 // "test next to module" convention (AGENTS.md) for that reason.
-import { validateUrl, isDeniedIp, normalizeAddresses, DENYLIST_CIDRS } from '../functions/api/analyze.js';
+import { validateUrl, isDeniedIp, normalizeAddresses, DENYLIST_CIDRS } from '../../functions/api/analyze.js';
 
 // The adapter holds the other copy of the denylist and of the IP arithmetic.
 // Importing it here is what makes the parity check below real rather than

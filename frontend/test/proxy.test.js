@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 
-import { onRequestPost } from '../functions/api/analyze.js';
+import { onRequestPost } from '../../functions/api/analyze.js';
 
 // onRequestPost uses only web APIs (Request/Response/fetch/AbortController) plus
 // node:dns, so it runs under node:test against a real local server. This is the

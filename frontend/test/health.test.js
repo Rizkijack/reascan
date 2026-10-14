@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { onRequestGet } from '../functions/api/health.js';
+import { onRequestGet } from '../../functions/api/health.js';
 
 // The route's whole job is a fixed liveness answer; the test pins the exact
 // shape so a future edit cannot quietly turn it into a probe with credentials

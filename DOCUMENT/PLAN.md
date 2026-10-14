@@ -188,7 +188,7 @@ Detail shape + aturan (type/evidence/confidence/limitation/unknown) di DESIGN.md
 
 ## 7. SSRF Guard Checklist (WAJIB — ini gate keamanan)
 
-Layer 1 (Workers, sebelum forward ke VM) — **implementasi: `frontend/functions/api/analyze.js`, teruji offline:**
+Layer 1 (Workers, sebelum forward ke VM) — **implementasi: `functions/api/analyze.js`, teruji offline:**
 - [x] Denylist: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (metadata!), 0.0.0.0, ::1, fc00::/7 — salinan identik `urlGuard.js`, dikunci test parity
 - [x] Resolve DNS dulu → cek IP hasil resolve bukan hostname (cegah DNS rebinding) — pakai `resolve4`/`resolve6`; Workers `node:dns` tidak mengimplementasikan `lookup`
 - [x] Blokir scheme non-http(s): file://, gopher://, ftp://
