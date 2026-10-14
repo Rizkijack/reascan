@@ -502,6 +502,40 @@ sebelahan modul" (AGENTS.md).
 
 Aturan shape: setiap finding = {key, value, type, evidence, confidence}. Type ∈ observation (terlihat langsung) | derivation (disimpulkan dari marker) | inference (diduga, jarang dipakai). Limitation = kegagalan/ketidakcukupan observasi. Unknown = pertanyaan terbuka yang observasi tidak bisa jawab.
 
+### Kategori REA: browser_capture & js_deep (bentuk section + aturan limitations)
+
+Dua kategori ini (`browserCapture`, `jsDeep`) dijalankan engine REA di VM (`lib/reaCli.js` → `lib/reaMcp.js`) dan menambahkan dua section opsional ke findings. Keduanya `null` bila kategori tidak diminta atau dispatch-nya gagal — tidak pernah object kosong yang berpura-pura berhasil.
+
+```json
+{
+  "browser_capture": {
+    "final_url": "https://target.com/",
+    "duration_ms": 5200,
+    "confidence": "observed",
+    "screenshot": "data:image/png;base64,...",
+    "events": { "request": 12, "response": 11, "failed": 1, "console": 2, "pageError": 0 },
+    "resource_types": { "script": 5, "stylesheet": 3, "document": 1 },
+    "failed_requests": [ { "url": "https://cdn.test/x.js", "failure": "net::ERR_FAILED" } ],
+    "page_errors": [ "Uncaught ReferenceError: x is not defined" ]
+  },
+  "js_deep": {
+    "files_analysed": 4, "modules": 120, "findings": 3,
+    "ast_nodes_visited": 8400, "parse_failures": 1,
+    "coverage_status": "partial", "confidence": "derived",
+    "unknowns": [ "Module graph crosses into an unloaded chunk" ]
+  }
+}
+```
+
+Aturan limitations REA (dikunci oleh test `reaOutcome` di `vm-adapter/server.test.js`):
+
+- Envelope REA punya `limitations[]` sendiri (screenshot step gagal, bundle gagal di-parse engine, dsb). `reaOutcome()` di `server.js` **me-hoist** array ini ke `verdict.limitations` — kegagalan di sisi engine tidak boleh hilang senyap (AGENTS.md: never drop silently).
+- Setelah di-hoist, field `limitations` di-strip dari payload section: bentuk section mengikuti pola `fingerprint`/`js_bundles` — **data hanya di section, limitations hanya di verdict**.
+- Dispatch gagal (`{ok:false}` dari `callReaTool` — tool tak dikenal, engine tak terpasang, timeout) masuk `verdict.limitations` dengan prefix nama tool: `"browser.capture: <reason>"`. Satu kategori gagal tidak menggagalkan request; kategori lain tetap jalan.
+- `unknowns` milik `js_deep` TIDAK dihoist — tetap di section-nya dan dirender di sana oleh `app.js`. Ini berbeda dengan `verdict.unknowns`, yang hanya berasal dari fingerprint (cdn/framework) lewat `buildVerdict()`.
+
+Frontend merender kedua section ini tanpa `innerHTML` (nilai capture bersifat target-controlled — lihat komentar header `app.js`): screenshot sebagai `<img>` dari data URL (dibatasi 500KB oleh adapter), event counts + resource-type breakdown sebagai baris meta, signals `obfuscation_signals` sebagai chips evidence di kartu bundle.
+
 ---
 
 ## 6. Sequence Flow (happy path)
