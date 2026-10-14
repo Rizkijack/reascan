@@ -238,10 +238,10 @@ export async function onRequestPost(context) {
     return json(500, { status: 'error', error: 'analysis engine is not configured' });
   }
 
-  // The adapter's own deadline is 45s; 60s here catches a dead tunnel rather
+  // The adapter's own deadline is 70s; 75s here catches a dead tunnel rather
   // than leaving the browser hanging until Workers kills the request.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
+  const timer = setTimeout(() => controller.abort(), 75000);
 
   let engine;
   try {

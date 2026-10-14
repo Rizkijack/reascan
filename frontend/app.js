@@ -117,7 +117,12 @@ function renderHistory() {
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined && text !== null) {
+    // Callers sometimes pass a child node (e.g. el('div', 'meta', el('span', …)));
+    // appending keeps it a node instead of coercing to "[object HTMLSpanElement]".
+    if (typeof text === 'object' && typeof text.appendChild === 'function') node.append(text);
+    else node.textContent = text;
+  }
   return node;
 }
 
@@ -226,6 +231,88 @@ function renderBundles(bundles) {
   return wrap;
 }
 
+function renderBrowserCapture(cap) {
+  const wrap = document.createDocumentFragment();
+  if (!cap) return wrap;
+
+  wrap.append(el('h3', null, 'Browser capture (REA)'));
+
+  if (cap.screenshot) {
+    const img = document.createElement('img');
+    img.className = 'screenshot';
+    img.alt = 'Rendered page screenshot captured by the REA engine';
+    img.src = cap.screenshot;
+    img.loading = 'lazy';
+    wrap.append(img);
+  }
+
+  const meta = el('div', 'meta');
+  const parts = [];
+  if (cap.final_url) parts.push(`final URL ${cap.final_url}`);
+  if (cap.duration_ms != null) parts.push(`${Math.round(cap.duration_ms / 100) / 10}s capture`);
+  if (cap.confidence) parts.push(`confidence ${cap.confidence}`);
+  if (parts.length) meta.append(el('span', null, parts.join(' · ')));
+  wrap.append(meta);
+
+  const ev = cap.events ?? {};
+  const summary = [
+    ['requests', ev.request],
+    ['responses', ev.response],
+    ['failed', ev.failed],
+    ['console messages', ev.console],
+    ['page errors', ev.pageError],
+  ].filter(([, v]) => v != null && v > 0).map(([k, v]) => `${v} ${k}`);
+  if (summary.length) wrap.append(el('div', 'meta', el('span', null, summary.join(' · '))));
+
+  if (cap.failed_requests?.length) {
+    wrap.append(el('h4', null, `Failed requests (${cap.failed_requests.length})`));
+    const ul = document.createElement('ul');
+    for (const f of cap.failed_requests) {
+      ul.append(el('li', null, `${f.failure ?? 'failed'} — ${f.url}`));
+    }
+    wrap.append(ul);
+  }
+
+  if (cap.page_errors?.length) {
+    wrap.append(el('h4', null, `Page errors (${cap.page_errors.length})`));
+    const ul = document.createElement('ul');
+    for (const msg of cap.page_errors) ul.append(el('li', null, String(msg)));
+    wrap.append(ul);
+  }
+
+  return wrap;
+}
+
+function renderJsDeep(deep) {
+  const wrap = document.createDocumentFragment();
+  if (!deep) return wrap;
+
+  wrap.append(el('h3', null, 'JS deep analysis (REA)'));
+
+  const stats = [
+    deep.files_analysed != null && `${deep.files_analysed} files`,
+    deep.modules != null && `${deep.modules.toLocaleString()} modules`,
+    deep.findings != null && `${deep.findings.toLocaleString()} findings`,
+    deep.ast_nodes_visited != null && `${deep.ast_nodes_visited.toLocaleString()} AST nodes`,
+    deep.parse_failures != null && `${deep.parse_failures} parse failures`,
+  ].filter(Boolean);
+  if (stats.length) wrap.append(el('div', 'meta', el('span', null, stats.join(' · '))));
+
+  const extra = [];
+  if (deep.coverage_status) extra.push(`coverage ${deep.coverage_status}`);
+  if (deep.confidence) extra.push(`confidence ${deep.confidence}`);
+  if (extra.length) wrap.append(el('div', 'meta', el('span', null, extra.join(' · '))));
+
+  if (deep.unknowns?.length) {
+    wrap.append(el('h4', null, `Unknowns (${deep.unknowns.length})`));
+    const ul = document.createElement('ul');
+    for (const u of deep.unknowns) ul.append(el('li', null, String(u)));
+    wrap.append(ul);
+  }
+
+  return wrap;
+}
+
 function renderFindings(findings) {
   const body = $('findings-body');
   body.textContent = '';
@@ -234,6 +321,8 @@ function renderFindings(findings) {
 
   body.append(renderFingerprint(findings.fingerprint));
   body.append(renderBundles(findings.js_bundles));
+  body.append(renderBrowserCapture(findings.browser_capture));
+  body.append(renderJsDeep(findings.js_deep));
 }
 
 function render() {
@@ -247,7 +336,7 @@ function render() {
   if (state.phase === 'loading') {
     status.className = 'status';
     status.textContent = '';
-    status.append(el('span', 'spinner'), document.createTextNode('Analyzing… fetching headers and bundles, up to ~45s.'));
+    status.append(el('span', 'spinner'), document.createTextNode('Analyzing… fetching headers and bundles, up to ~70s.'));
     results.hidden = true;
   } else if (state.phase === 'error') {
     status.className = 'status error';

@@ -145,6 +145,22 @@ td code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size
   color: var(--muted); font-size: 13px;
 }
 
+/* REA-backed categories: a small tag marks engine-powered checkboxes, and the
+   captured screenshot renders at content width with the same card treatment. */
+.categories .tag {
+  font-size: 11px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 1px 6px; margin-left: 4px;
+}
+
+.screenshot {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  margin: 8px 0;
+}
+
+#findings-body h4 { font-size: 14px; margin: 14px 0 6px; }
+
 @media (max-width: 560px) {
   .form-row { flex-direction: column; }
   .history button { flex-direction: column; gap: 2px; }

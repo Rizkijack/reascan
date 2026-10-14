@@ -1,26 +1,50 @@
-// REA MCP client — PHASE 2 STUB. Nothing in the adapter calls this yet.
+// REA integration — real implementation (phase 2).
 //
-// The MVP adapter is standalone: fingerprint and jsBundle are implemented with
-// Node built-ins only. When phase 2 starts, this module becomes a stdio MCP
-// client to the REA server so the heavy categories (Electron/ASAR, binary via
-// Ghidra, APK) can be dispatched to REA's tools.
+// Previously a stub; now dispatches to the REA engine installed on the VM via
+// lib/reaCli.js (subprocess to the `rea` CLI — the adapter stays zero-dependency).
+// The integration contract is unchanged: every dispatch answers
+// {ok:true, ...} | {ok:false, reason} so a category that reaches REA degrades
+// to a limitation instead of throwing.
 //
-// The stub exists so the shape of the integration point is fixed now: it
-// answers {ok:false, reason} like every other failure in this codebase, and a
-// category that reaches it degrades to a limitation instead of throwing.
+// Tool catalogue (dotted names, as before):
+//   browser.capture  — bounded Playwright scenario: screenshot + DOM + network
+//                      evidence via the REA engine (needs reaEnv prerequisites)
+//   js.analyzeDeep   — REA static analysis over the page's downloaded bundles
+//
+// Categories the engine cannot serve on this VM (no Ghidra/IDA, no JADX/JDK)
+// are answered {ok:false} with a reason naming the missing piece, so callers
+// surface them as limitations.
 
-export const REA_MCP_ENABLED = false;
+import { captureBrowser, analyzeJsDeep } from './reaCli.js';
 
-// Tools phase 2 expects to expose. Kept as data, not code, so the categories
-// the adapter advertises and the tools it can actually dispatch stay in view.
+export const REA_MCP_ENABLED = true;
+
 export const REA_TOOLS = [
-  'asar.extract',
-  'ghidra.analyzeHeadless',
-  'apktool.decode',
+  'browser.capture',
+  'js.analyzeDeep',
 ];
 
-// Dispatch one REA tool. Always fails in the MVP — see phase 2 checklist in
-// DOCUMENT/PLAN.md before giving this a real implementation.
-export async function callReaTool(_tool, _args) {
-  return { ok: false, reason: 'rea mcp integration is not available (phase 2)' };
+// Dispatch one REA tool.
+// args: { url, safeFetch?, timeoutMs? } — safeFetch is the adapter's guarded
+// fetch, required by js.analyzeDeep for downloading bundles.
+export async function callReaTool(tool, args = {}) {
+  const { url, safeFetch, timeoutMs } = args;
+  if (!url) return { ok: false, reason: 'callReaTool requires args.url' };
+
+  switch (tool) {
+    case 'browser.capture':
+      return captureBrowser(url, { timeoutMs });
+    case 'js.analyzeDeep': {
+      if (typeof safeFetch !== 'function') {
+        return { ok: false, reason: 'js.analyzeDeep requires args.safeFetch' };
+      }
+      return analyzeJsDeep(url, safeFetch, { timeoutMs });
+    }
+    case 'asar.extract':
+    case 'ghidra.analyzeHeadless':
+    case 'apktool.decode':
+      return { ok: false, reason: `${tool} needs an analysis engine not installed on this VM (see docs/vm-setup.md)` };
+    default:
+      return { ok: false, reason: `unknown REA tool: ${tool}` };
+  }
 }

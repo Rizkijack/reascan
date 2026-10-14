@@ -28,7 +28,11 @@ test('health responds only with the correct key', async () => {
   await withServer({}, async (call) => {
     const ok = await call('/health', { headers: { 'x-api-key': KEY } });
     assert.equal(ok.status, 200);
-    assert.deepEqual(await ok.json(), { status: 'ok', tools_available: ['fingerprint', 'jsBundle'] });
+    assert.deepEqual(await ok.json(), {
+      status: 'ok',
+      tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'],
+      rea_tools: ['browser.capture', 'js.analyzeDeep'],
+    });
   });
 });
 

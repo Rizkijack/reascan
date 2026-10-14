@@ -49,7 +49,11 @@ test('the adapter refuses an unauthenticated health check', async () => {
     assert.equal((await fetch(`${base}/health`)).status, 401);
     const ok = await fetch(`${base}/health`, { headers: { 'x-api-key': KEY } });
     assert.equal(ok.status, 200);
-    assert.deepEqual(await ok.json(), { status: 'ok', tools_available: ['fingerprint', 'jsBundle'] });
+    assert.deepEqual(await ok.json(), {
+      status: 'ok',
+      tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'],
+      rea_tools: ['browser.capture', 'js.analyzeDeep'],
+    });
   });
 });
 

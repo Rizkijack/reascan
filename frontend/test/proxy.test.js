@@ -140,7 +140,7 @@ test('engine failures map onto the documented public statuses', async () => {
   // prompt, and a 504 deadline must not widen the contract.
   const cases = [
     [422, 'url blocked: resolves to private IP 10.0.0.5', 422],
-    [504, 'analysis exceeded 45000ms', 502],
+    [504, 'analysis exceeded 70000ms', 502],
     [401, 'unauthorised', 502],
     [500, 'internal error: boom', 502],
   ];

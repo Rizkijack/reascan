@@ -12,10 +12,11 @@ import { pathToFileURL } from 'node:url';
 import { safeFetch, validateUrl } from './lib/urlGuard.js';
 import { fingerprint } from './modules/fingerprint.js';
 import { analyzeBundles } from './modules/jsBundle.js';
+import { callReaTool, REA_TOOLS } from './lib/reaMcp.js';
 
 // The Pages Function allows this request 60s end to end, so the two analyses share
 // one budget rather than each getting a full slice of it.
-const REQUEST_TIMEOUT_MS = 45000;
+const REQUEST_TIMEOUT_MS = 70000;
 const MAX_BODY_BYTES = 8192;
 
 // Comparing lengths first is not optional: timingSafeEqual throws on buffers of
@@ -95,8 +96,11 @@ async function handleAnalyze(req, res, env) {
   // Both modules take url first and a guard second; categories decide which run,
   // not how they are called. A throw from either degrades to an empty result so
   // one broken category cannot cost the caller the whole report.
+  // The REA categories follow the same contract: callReaTool never throws, and
+  // an {ok:false} answer becomes a limitation, not a failed request.
   const emptyFp = { findings: [], cdn: null, tls: null, limitations: [] };
   const emptyBundles = { bundles: [], limitations: [] };
+  const emptyRea = { data: null, limitations: [] };
 
   const fpTask = requested.includes('fingerprint')
     ? fingerprint(check.url.toString(), safeFetch)
@@ -107,8 +111,31 @@ async function handleAnalyze(req, res, env) {
     ? analyzeBundles(check.url.toString(), safeFetch)
     : Promise.resolve(emptyBundles);
 
+  const reaTask = async (tool) => {
+    try {
+      const result = await callReaTool(tool, {
+        url: check.url.toString(),
+        safeFetch,
+        timeoutMs: REQUEST_TIMEOUT_MS - 5000,
+      });
+      if (result.ok) return { data: result.capture ?? result.analysis ?? null, limitations: [] };
+      return { ...emptyRea, limitations: [`${tool}: ${result.reason}`] };
+    } catch (e) {
+      return { ...emptyRea, limitations: [`${tool} aborted: ${e.message}`] };
+    }
+  };
+
+  const browserTask = requested.includes('browserCapture')
+    ? reaTask('browser.capture')
+    : Promise.resolve(emptyRea);
+
+  const jsDeepTask = requested.includes('jsDeep')
+    ? reaTask('js.analyzeDeep')
+    : Promise.resolve(emptyRea);
+
   // Worst case for jsBundle is 40 bundles across 6 workers at 10s each, which is
-  // roughly 70s — past the 60s the Pages Function allows this whole request. The
+  // roughly 70s — right at the edge of the 75s the Pages Function allows this
+  // whole request. The
   // per-fetch timeouts inside the modules are not enough on their own, so the
   // overall budget is enforced here and the caller gets a 504 instead of hanging.
   // Work already in flight is abandoned rather than cancelled: the modules take
@@ -120,13 +147,18 @@ async function handleAnalyze(req, res, env) {
 
   let fp;
   let bundles;
+  let browser;
+  let jsDeep;
   try {
-    [fp, bundles] = await Promise.race([Promise.all([fpTask, bundleTask]), deadline]);
+    [fp, bundles, browser, jsDeep] = await Promise.race([
+      Promise.all([fpTask, bundleTask, browserTask, jsDeepTask]),
+      deadline,
+    ]);
   } catch (err) {
     return send(res, 504, { status: 'error', error: err.message });
   }
 
-  const limitations = [...fp.limitations, ...bundles.limitations];
+  const limitations = [...fp.limitations, ...bundles.limitations, ...browser.limitations, ...jsDeep.limitations];
   const verdict = buildVerdict(fp.findings, limitations);
 
   return send(res, 200, {
@@ -136,6 +168,8 @@ async function handleAnalyze(req, res, env) {
       timestamp: new Date().toISOString(),
       fingerprint: { findings: fp.findings, cdn: fp.cdn, tls: fp.tls },
       js_bundles: bundles.bundles,
+      browser_capture: browser.data,
+      js_deep: jsDeep.data,
       verdict,
     },
     duration_ms: Date.now() - started,
@@ -155,7 +189,7 @@ export function createAdapter(env) {
       }
 
       if (req.method === 'GET' && req.url === '/health') {
-        return send(res, 200, { status: 'ok', tools_available: ['fingerprint', 'jsBundle'] });
+        return send(res, 200, { status: 'ok', tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'], rea_tools: REA_TOOLS });
       }
       if (req.method === 'POST' && req.url === '/analyze') {
         return await handleAnalyze(req, res, env);

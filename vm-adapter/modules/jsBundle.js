@@ -42,7 +42,9 @@ const OBFUSCATION_SIGNALS = [
   { name: 'base64 blob', re: /["'`][A-Za-z0-9+/]{200,}={0,2}["'`]/ },
 ];
 
-function extractScripts(html, baseUrl) {
+// Exported for reuse by the REA deep-analysis path (reaCli.analyzeJsDeep),
+// which downloads the same script inventory into a temp dir for the engine.
+export function extractScripts(html, baseUrl) {
   const found = [];
   const seen = new Set();
 

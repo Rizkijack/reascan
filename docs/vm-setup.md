@@ -28,6 +28,34 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 ```
 
+### 1b. REA engine (for the `browserCapture` + `jsDeep` categories)
+
+The adapter shells out to the `rea` CLI — no npm install needed, but the
+binary must exist and the browser-capture prerequisites must be in place:
+
+```bash
+rea --version      # >= 6.x; install: npm install -g rea-agents --prefix ~/.local
+```
+
+`browserCapture` needs two local helpers (the adapter's `lib/reaEnv.js`
+starts them on demand, so this is only for manual verification):
+
+1. **Proxy forwarder** on `127.0.0.1:18080` — REA strips proxy env vars from
+   browsers it launches, and this VM reaches the internet only through an
+   authenticated egress proxy. The forwarder (`~/workspace/rea-proxy/proxy.mjs`)
+   injects `Proxy-Authorization` for the upstream. It needs
+   `UPSTREAM_PROXY_*` env vars parsed from `$https_proxy`.
+2. **Headless Chromium** with CDP on `127.0.0.1:9222`, launched with
+   `--proxy-server=http://127.0.0.1:18080` **and**
+   `--ignore-certificate-errors` (the egress proxy terminates TLS with its own
+   CA, which Chromium does not trust).
+
+Env overrides: `REA_BIN` (rea binary path), `REA_PROXY_SCRIPT`,
+`REA_PROXY_PORT`, `REA_CDP_PORT`, `REA_CHROME_BIN`.
+
+Categories the engine cannot serve here degrade to limitations, not errors:
+native binaries need Ghidra/IDA, APKs need JADX/JDK — none installed.
+
 ## 2. Get the code
 
 The VM agent clones (or forks) the public repo:
