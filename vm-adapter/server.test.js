@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, chmod } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -166,13 +166,6 @@ test('unknown categories produce a low-confidence report rather than an error', 
   });
 });
 
-// The fixture is a POSIX shell script and reaCli spawns without a shell, so it
-// cannot run on Windows — same reasoning as reaCli.test.js. These run on the VM,
-// which is where `rea` lives.
-const needsPosix = process.platform === 'win32'
-  ? { skip: 'fixture is a POSIX shell script; Windows spawn cannot execute it' }
-  : {};
-
 // The REA deep-analysis envelope, distilled by distilJsAnalysis, carries its own
 // limitations array. server.js must hoist those into verdict.limitations and
 // strip them from the section payload — the same shape fingerprint and js_bundles
@@ -213,14 +206,22 @@ test('reaOutcome hoists limitations and strips them from the payload', () => {
   assert.deepEqual(reaOutcome({ ok: true }), { data: null, limitations: [] });
 });
 
-test('REA limitations reach the verdict and stay out of the section payload', needsPosix, async () => {
+test('REA limitations reach the verdict and stay out of the section payload', async () => {
+  // A `.mjs` fixture, not a shell script: resolveSpawn runs it through node, so
+  // this case executes on every platform. It had been skipped on Windows, and on
+  // POSIX its hand-escaped `echo` quoting did not actually emit the JSON it
+  // claimed to — so the invariant below had never really been checked anywhere.
   const dir = await mkdtemp(join(tmpdir(), 'reascan-fake-rea-'));
-  const bin = join(dir, 'rea');
-  await writeFile(bin, '#!/bin/sh\n'
-    + 'echo \'{"normalized_result":{"statistics":{"modules":7,"findings":2,"visited_ast_nodes":99,"parse_failures":1},'
-    + '"semantic_graph":{"coverage":{"status":"partial"},"unknowns":[]},'
-    + '"limitations":["engine could not parse bundle-3.js"]},"confidence":"derived\'}\'');
-  await chmod(bin, 0o755);
+  const bin = join(dir, 'rea.mjs');
+  const envelope = {
+    normalized_result: {
+      statistics: { modules: 7, findings: 2, visited_ast_nodes: 99, parse_failures: 1 },
+      semantic_graph: { coverage: { status: 'partial' }, unknowns: [] },
+      limitations: ['engine could not parse bundle-3.js'],
+    },
+    confidence: 'derived',
+  };
+  await writeFile(bin, `process.stdout.write(${JSON.stringify(`${JSON.stringify(envelope)}\n`)});`);
 
   const prev = process.env.REA_BIN;
   process.env.REA_BIN = bin;

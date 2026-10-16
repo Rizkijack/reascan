@@ -37,21 +37,35 @@ binary must exist and the browser-capture prerequisites must be in place:
 rea --version      # >= 6.x; install: npm install -g rea-agents --prefix ~/.local
 ```
 
-`browserCapture` needs two local helpers (the adapter's `lib/reaEnv.js`
-starts them on demand, so this is only for manual verification):
+`browserCapture` needs a headless Chromium with CDP on `127.0.0.1:9222`
+(`lib/reaEnv.js` starts it on demand, so this is only for manual verification).
+On this VM that Chromium is additionally launched through a **proxy forwarder**
+on `127.0.0.1:18080`: REA strips proxy env vars from browsers it launches, and
+the VM reaches the internet only through an authenticated egress proxy, so the
+forwarder (`~/workspace/rea-proxy/proxy.mjs`) injects `Proxy-Authorization`
+for the upstream, using `UPSTREAM_PROXY_*` env vars parsed out of
+`$https_proxy`.
 
-1. **Proxy forwarder** on `127.0.0.1:18080` — REA strips proxy env vars from
-   browsers it launches, and this VM reaches the internet only through an
-   authenticated egress proxy. The forwarder (`~/workspace/rea-proxy/proxy.mjs`)
-   injects `Proxy-Authorization` for the upstream. It needs
-   `UPSTREAM_PROXY_*` env vars parsed from `$https_proxy`.
-2. **Headless Chromium** with CDP on `127.0.0.1:9222`, launched with
-   `--proxy-server=http://127.0.0.1:18080` **and**
-   `--ignore-certificate-errors` (the egress proxy terminates TLS with its own
-   CA, which Chromium does not trust).
+The forwarder is started **only when `https_proxy` actually names an upstream**.
+A host with direct egress runs no forwarder and Chromium gets no proxy flags -
+in particular it does **not** get `--ignore-certificate-errors`, which exists
+because the VM's egress proxy terminates TLS with its own CA, and must not
+follow the adapter onto a host whose certificates are valid.
 
-Env overrides: `REA_BIN` (rea binary path), `REA_PROXY_SCRIPT`,
-`REA_PROXY_PORT`, `REA_CDP_PORT`, `REA_CHROME_BIN`.
+If something already holds `127.0.0.1:9222` without speaking the DevTools HTTP
+API, browser capture fails with an explicit port-collision reason instead of a
+generic launch error. Free the port, or point `REA_CDP_PORT` elsewhere.
+
+Env overrides: `REA_BIN` (rea binary path - on Windows npm installs only
+`.cmd`/`.ps1` shims that `spawn` cannot use, so the adapter invokes the
+package's own ESM entry through Node instead of through a shell), 
+`REA_PROXY_SCRIPT`, `REA_PROXY_PORT`, `REA_CDP_PORT`, `REA_CHROME_BIN`,
+`REA_CHROME_PROFILE`, `REA_IGNORE_CERT_ERRORS`.
+
+`REA_IGNORE_CERT_ERRORS=1` is the explicit opt-in for `--ignore-certificate-errors`
+on direct egress. Leave it unset there: a target with a self-signed or
+hostname-mismatched certificate is a normal target for this tool, but a blanket
+TLS bypass on every host is not a reasonable default.
 
 Categories the engine cannot serve here degrade to limitations, not errors:
 native binaries need Ghidra/IDA, APKs need JADX/JDK — none installed.
@@ -95,7 +109,11 @@ HOST=127.0.0.1
 
 The **same** `API_KEY` must be set as a secret in the Cloudflare Pages dashboard
 (Settings → Environment variables → Add secret), together with `VM_ADAPTER_URL` (the tunnel
-hostname). Generate one yourself:
+hostname). A deployed Pages function missing either one answers
+`500 analysis engine is not configured` before it ever contacts the adapter:
+that is a dashboard gap, not an adapter fault, and no adapter log will show it.
+For local iteration both values come from `.dev.vars` at the repo root instead.
+Generate one yourself:
 
 ```bash
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"

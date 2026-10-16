@@ -14,9 +14,10 @@
 // Hopper/Ghidra/IDA, JADX/JDK, or ilspycmd, none of which is installed.
 
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 
 let cachedBin = null;
 
@@ -37,6 +38,44 @@ export function _resetBinaryCache() {
   cachedBin = null;
 }
 
+// Turn a configured binary name into something spawn() can actually start.
+//
+// On POSIX `rea` is a real executable and the name passes through untouched.
+// On Windows npm writes only `rea.cmd`/`rea.ps1` shims: spawn() resolves neither
+// (ENOENT — Node does not walk PATHEXT) and refuses .cmd outright without a
+// shell (EINVAL). Those shims are generated wrappers that end in the package's
+// own ESM entry, so we invoke that script with the interpreter already running
+// us. This is what the shim does, minus the shell — no shell:true, no quoting,
+// no way for an argument to become shell syntax.
+export function resolveSpawn(bin) {
+  if (/\.m?js$/i.test(bin)) return { command: process.execPath, prefixArgs: [bin] };
+
+  // Only for the implicit PATH lookup. An explicit REA_BIN is the operator's
+  // chosen command and is left alone; REA_BIN=rea is the one spelling that
+  // asks for exactly what this default would ask for.
+  if (process.platform === 'win32' && bin === 'rea') {
+    const entry = findWindowsReaEntry();
+    if (entry) return { command: process.execPath, prefixArgs: [entry] };
+  }
+  return { command: bin, prefixArgs: [] };
+}
+
+function findWindowsReaEntry() {
+  for (const raw of (process.env.PATH || '').split(';')) {
+    // Windows PATH is REG_EXPAND_SZ and entries with spaces are commonly stored
+    // quoted ("C:\Program Files\…"); the quotes are not part of the path. A
+    // relative entry would resolve against our own cwd, which is not what the
+    // operator's shell would do, so it is skipped rather than guessed at.
+    const dir = raw.trim().replace(/^"(.*)"$/, '$1');
+    if (!dir || !isAbsolute(dir)) continue;
+    const entry = join(dir, 'node_modules', 'rea-agents', 'scripts', 'rea.mjs');
+    try {
+      if (existsSync(entry)) return entry;
+    } catch { /* unreadable PATH entry */ }
+  }
+  return null;
+}
+
 // Run `rea ... --format json` and return the parsed result envelope.
 // rea streams progress as JSONL on long commands, so the whole-stdout parse
 // is attempted first and the last parseable line second.
@@ -54,9 +93,13 @@ export function runReaJson(args, { timeoutMs = 60000 } = {}) {
 
     let child;
     try {
-      child = spawn(bin, [...args, '--format', 'json'], {
+      const { command, prefixArgs } = resolveSpawn(bin);
+      child = spawn(command, [...prefixArgs, ...args, '--format', 'json'], {
         stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: timeoutMs,
+        // No `timeout` option here on purpose. spawn's own timeout silently
+        // killed the child at the deadline and let the close handler report a
+        // timeout as "exited null without parseable JSON", so the accurate
+        // message below was unreachable. One authority owns the deadline.
         // The VM egress needs the proxy for outbound traffic; rea itself does
         // not need it (it drives a local browser / reads local files), and the
         // browser path is handled separately by reaEnv.
@@ -69,7 +112,7 @@ export function runReaJson(args, { timeoutMs = 60000 } = {}) {
     const timer = setTimeout(() => {
       try { child.kill('SIGKILL'); } catch { /* already gone */ }
       done({ ok: false, reason: `rea ${args[0]} timed out after ${timeoutMs}ms` });
-    }, timeoutMs + 2000);
+    }, timeoutMs);
     timer.unref?.();
 
     child.stdout.on('data', (c) => { stdout += c; });
