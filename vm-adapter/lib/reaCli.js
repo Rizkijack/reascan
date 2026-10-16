@@ -69,9 +69,10 @@ function findWindowsReaEntry() {
     const dir = raw.trim().replace(/^"(.*)"$/, '$1');
     if (!dir || !isAbsolute(dir)) continue;
     const entry = join(dir, 'node_modules', 'rea-agents', 'scripts', 'rea.mjs');
-    try {
-      if (existsSync(entry)) return entry;
-    } catch { /* unreadable PATH entry */ }
+    // No try/catch: existsSync is specified never to throw — it answers with a
+    // boolean for every input, including malformed and over-long paths — so a
+    // catch here would be unreachable code implying it is reachable.
+    if (existsSync(entry)) return entry;
   }
   return null;
 }

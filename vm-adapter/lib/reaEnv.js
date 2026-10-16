@@ -112,6 +112,11 @@ async function ensureProxyForwarder() {
       reason: 'an egress proxy is configured but exposes no user:pass@host:port for the forwarder to inject — this host cannot reach the internet through it',
     };
   }
+  // A failed spawn is an asynchronous 'error' event, and an EventEmitter with
+  // no 'error' listener throws it as an uncaughtException — which would take
+  // the whole adapter down. The readiness poll decides the outcome; this only
+  // records why, so the failure names the cause instead of arriving blank.
+  let spawnError = null;
   try {
     const child = spawn(process.execPath, [PROXY_SCRIPT], {
       detached: true,
@@ -125,15 +130,21 @@ async function ensureProxyForwarder() {
         LISTEN_PORT: String(PROXY_PORT),
       },
     });
+    child.on('error', (err) => { spawnError = err; });
     child.unref();
   } catch (err) {
     return { ok: false, reason: `could not start proxy forwarder: ${err.message}` };
   }
   for (let i = 0; i < 10; i++) {
+    if (spawnError) break;
     await sleep(500);
     if (await tcpConnectable(PROXY_PORT)) return { ok: true, mode: 'forwarder' };
   }
-  return { ok: false, reason: `proxy forwarder did not come up on 127.0.0.1:${PROXY_PORT}` };
+  return {
+    ok: false,
+    reason: `proxy forwarder did not come up on 127.0.0.1:${PROXY_PORT}`
+      + (spawnError ? ` — could not start ${PROXY_SCRIPT}: ${spawnError.message}` : ''),
+  };
 }
 
 async function httpPutJson(url, timeoutMs = 5000) {
@@ -185,10 +196,12 @@ async function ensureChromeCdp(mode) {
   delete env.http_proxy; delete env.https_proxy;
   delete env.HTTP_PROXY; delete env.HTTPS_PROXY;
 
-  // Chromium refuses to start in silence when a profile directory is still held
-  // by an orphaned instance, and the exit code is the only clue. Record it so
-  // the failure names its cause instead of arriving blank.
+  // Both failure shapes are recorded rather than thrown. A missing binary is an
+  // asynchronous 'error' event, and an EventEmitter without an 'error' listener
+  // rethrows it as an uncaughtException that kills the adapter — so a host with
+  // no Chromium would lose the process instead of losing one category.
   let chromeExit = null;
+  let spawnError = null;
   try {
     const child = spawn(CHROME_BIN, [
       '--headless=new',
@@ -200,12 +213,14 @@ async function ensureChromeCdp(mode) {
       `--user-data-dir=${CHROME_PROFILE}`,
       'about:blank',
     ], { detached: true, stdio: 'ignore', env });
+    child.on('error', (err) => { spawnError = err; });
     child.on('exit', (code) => { chromeExit = code; });
     child.unref();
   } catch (err) {
     return { ok: false, reason: `could not launch Chromium (${CHROME_BIN}): ${err.message}` };
   }
   for (let i = 0; i < 20; i++) {
+    if (spawnError) break;
     await sleep(500);
     try {
       await httpGetJson(`http://127.0.0.1:${CDP_PORT}/json/version`);
@@ -216,16 +231,34 @@ async function ensureChromeCdp(mode) {
   return {
     ok: false,
     reason: `Chromium CDP did not come up on 127.0.0.1:${CDP_PORT}`
-      + (chromeExit !== null
-        ? ` — Chromium exited with code ${chromeExit}; a profile directory still held by an orphaned Chrome is a known cause, so try a different REA_CHROME_PROFILE`
-        : ''),
+      + (spawnError
+        ? ` — Chromium could not be started (${CHROME_BIN}): ${spawnError.message}`
+        : chromeExit !== null
+          ? ` — Chromium exited with code ${chromeExit}; a profile directory still held by an orphaned Chrome is a known cause, so try a different REA_CHROME_PROFILE`
+          : ''),
   };
 }
+
+// Cold start is a multi-second operation that launches processes against one
+// shared profile directory and one shared port. Concurrent analyses must share a
+// single attempt: racing it means N browsers against the same profile lock, and
+// every loser fails. Cleared once settled so the next call re-checks the live
+// state rather than replaying a stale answer.
+let envInFlight = null;
 
 // Ensure the full browser-capture environment. Idempotent: running helpers
 // are reused, missing ones are started.
 export async function ensureBrowserCaptureEnv() {
-  const proxy = await ensureProxyForwarder();
-  if (!proxy.ok) return proxy;
-  return ensureChromeCdp(proxy.mode);
+  if (!envInFlight) {
+    envInFlight = (async () => {
+      try {
+        const proxy = await ensureProxyForwarder();
+        if (!proxy.ok) return proxy;
+        return await ensureChromeCdp(proxy.mode);
+      } finally {
+        envInFlight = null;
+      }
+    })();
+  }
+  return envInFlight;
 }

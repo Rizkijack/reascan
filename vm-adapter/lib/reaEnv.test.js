@@ -111,10 +111,69 @@ test('forwarder mode keeps its bypass even when nothing else is overridden', () 
   assert.ok(args.some((a) => a.startsWith('--proxy-server=')));
 });
 
-test('REA_IGNORE_CERT_ERRORS=1 restores the TLS bypass on direct egress, and nothing else', () => {
+test('REA_IGNORE_CERT_ERRORS=1 restores the TLS browser flag on direct egress, and nothing else', () => {
   // A self-signed or hostname-mismatched target is a normal target for a tool
   // pointed at hostile infrastructure, so the opt-in has to exist — but it must
   // not also conjure up a proxy route that direct egress does not have.
   const args = withEnv({ REA_IGNORE_CERT_ERRORS: '1' }, () => proxyArgsFor('direct'));
   assert.deepEqual(args, ['--ignore-certificate-errors']);
+});
+
+// --- cold start --------------------------------------------------------------
+// reaEnv resolves its ports and browser path at module scope, so these cases
+// load a fresh copy of the module instead of mutating env around a shared
+// import that has already been evaluated.
+
+async function withColdModule(envVars, fn) {
+  const prev = new Map(Object.keys(envVars).map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(envVars)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    const fresh = await import(`./reaEnv.js?cold=${Math.random()}`);
+    return await fn(fresh);
+  } finally {
+    for (const [key, value] of prev) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+const NO_CHROMIUM = {
+  REA_CHROME_BIN: 'C:/definitely/not/installed/chrome.exe',
+  REA_CDP_PORT: '19917',
+  https_proxy: undefined,
+  HTTPS_PROXY: undefined,
+  http_proxy: undefined,
+  HTTP_PROXY: undefined,
+};
+
+test('a missing Chromium degrades to a reason instead of killing the process', async () => {
+  // The regression this pins: spawn reports a missing binary as an asynchronous
+  // 'error' event, and an EventEmitter with no 'error' listener rethrows it as an
+  // uncaughtException. Without a listener this test process dies here rather
+  // than failing an assertion — which is exactly what it did.
+  await withColdModule(NO_CHROMIUM, async ({ ensureBrowserCaptureEnv }) => {
+    const result = await ensureBrowserCaptureEnv();
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /Chromium could not be started/);
+  });
+});
+
+test('concurrent cold starts share one attempt instead of racing the profile lock', async () => {
+  // Five cold analyses must not each launch a browser at the same profile
+  // directory and port; four of them would lose the lock and every caller would
+  // report a failure that never had to happen. Identity of the result object is
+  // what proves they shared one attempt.
+  await withColdModule(NO_CHROMIUM, async ({ ensureBrowserCaptureEnv }) => {
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => ensureBrowserCaptureEnv()),
+    );
+    assert.equal(results.length, 5);
+    for (const result of results) assert.equal(result.ok, false);
+    assert.ok(results.every((result) => result === results[0]),
+      'every concurrent caller should observe the same in-flight attempt');
+  });
 });
