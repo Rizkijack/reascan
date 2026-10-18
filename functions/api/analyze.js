@@ -221,6 +221,14 @@ function json(status, payload) {
   });
 }
 
+// Any method but POST used to fall through to the static layer and answer
+// 200 text/html (the page's own index) — a client parsing every /api/* reply
+// as JSON would choke on it. This does not touch the POST contract, which
+// stays 200 / 422 / 502 (DESIGN §5).
+export function onRequestGet() {
+  return json(405, { status: 'error', error: 'method not allowed' });
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
 

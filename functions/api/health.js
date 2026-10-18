@@ -10,3 +10,12 @@ export async function onRequestGet() {
     headers: { 'content-type': 'application/json; charset=utf-8' },
   });
 }
+
+// GET only. Any other method would fall through to the static layer and answer
+// 200 text/html instead of JSON — same rule as functions/api/[[catchall]].js.
+export function onRequestPost() {
+  return new Response(JSON.stringify({ status: 'error', error: 'method not allowed' }), {
+    status: 405,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+}

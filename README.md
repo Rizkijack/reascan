@@ -55,20 +55,22 @@ reascan/
 │   └── vm-setup.md          # VM install guide (for the agent on the VM)
 ├── smoke-e2e.mjs            # end-to-end smoke: steps 1-6 as one chain
 ├── smoke-all.mjs            # feature smoke for every step 1-7 (local, no VM)
-├── frontend/                # Cloudflare Pages project (single deploy unit)
+├── .dev.vars.example        # local dev vars template (VM_ADAPTER_URL, API_KEY)
+├── functions/               # Pages Functions (auto-routed /api/*) — repo ROOT:
+│   └── api/                 #   wrangler resolves functions/ from the working
+│       ├── analyze.js       #   directory, and tests/dev-server/smoke import
+│       ├── health.js        #   it root-relative (GET /api/health)
+│       └── [[catchall]].js  # 404 JSON for unknown /api/* paths
+├── frontend/                # Cloudflare Pages project (the deploy directory)
 │   ├── index.html           # the page: form + results panel
 │   ├── style.css            # Vercel-dark theme, vanilla
 │   ├── app.js               # fetch + render + localStorage history
 │   ├── package.json         # type: module (ESM for node --test)
-│   ├── .dev.vars.example    # local dev vars (VM_ADAPTER_URL, API_KEY)
-│   ├── test/                # tests (outside functions/ on purpose — see note)
-│   │   ├── analyze.test.js  # validateUrl guard, offline via injected DNS
-│   │   ├── proxy.test.js    # onRequestPost round-trip vs a local fake engine
-│   │   ├── integration.test.js # real edge function vs real adapter
-│   │   └── health.test.js   # fixed health contract
-│   └── functions/api/       # Pages Functions (auto-routed /api/*)
-│       ├── analyze.js       # handler + SSRF guard (validateUrl exported for tests)
-│       └── health.js        # GET /api/health
+│   └── test/                # tests (outside functions/ on purpose — see note)
+│       ├── analyze.test.js  # validateUrl guard, offline via injected DNS
+│       ├── proxy.test.js    # proxy round-trip + the /api 404/405 JSON contract
+│       ├── integration.test.js # real edge function vs real adapter
+│       └── health.test.js   # fixed health contract + wrong-method 405
 ├── vm-adapter/              # Node service — runs on the VM
 │   ├── install.sh           # one-command VM install (systemd + cloudflared)
 │   ├── package.json         # type: module, zero deps, node --test
@@ -90,7 +92,7 @@ Zero framework. Zero build step. Zero dependencies (Node built-ins only).
 
 ## Development status
 
-Fase 1, 7 of 8 steps done. Engine, server, install tooling, and the full frontend (page + Pages Functions) are built, tested, and whole-tree audited. Step 8 (deploy) is not started.
+Fase 1, 8 of 8 steps done. Engine, server, install tooling, and the full frontend (page + Pages Functions) are built, tested, and whole-tree audited. Step 8 (deploy) is live: reascan.pages.dev serves the page and /api/* through a Cloudflare quick tunnel whose URL is kept in sync (secret + redeploy) by the Windows tunnel runner.
 
 | # | Step | State |
 |---|---|---|
@@ -101,13 +103,13 @@ Fase 1, 7 of 8 steps done. Engine, server, install tooling, and the full fronten
 | 5 | `install.sh`, `reaMcp.js`, `.env.example` | done, tested |
 | 6 | `frontend/` + Pages Functions | done, tested |
 | 7 | Whole-tree audit | done, clean |
-| 8 | Deploy (Pages + Tunnel) | not started |
+| 8 | Deploy (Pages + Tunnel) | done — live at reascan.pages.dev |
 
-`node --test` — **63 passing** inside `vm-adapter/` (the last three server tests reach the real network; everything else runs offline) and **22 passing** inside `frontend/`: guard tests offline through an injected DNS resolver, proxy round-trips against a local stand-in adapter (key forwarding, findings pass-through, status mapping, malformed engine replies), the fixed health response, and an integration test that drives the real Pages Function against the real adapter.
+`node --test` — **92 passing** inside `vm-adapter/` (the last three server tests reach the real network; everything else runs offline) and **29 passing** inside `frontend/`: guard tests offline through an injected DNS resolver, proxy round-trips against a local stand-in adapter (key forwarding, findings pass-through, status mapping, malformed engine replies), the fixed health response, and an integration test that drives the real Pages Function against the real adapter.
 
-The adapter has been verified running locally but has never been installed on a VM. `install.sh` and the frontend are written to spec but unexercised end-to-end: no tunnel, no Pages project, nothing live.
+The adapter runs as Windows scheduled tasks (`reascan-adapter`, `reascan-tunnel`) on the operator's machine; `install.sh` remains the systemd path for a Linux VM. The full chain — page → edge → tunnel → adapter — is exercised live at reascan.pages.dev.
 
-Two scripts cover the whole chain locally, no VM required: `node smoke-e2e.mjs` (steps 1-6 in one pass, 25 checks) and `node smoke-all.mjs` (every feature of steps 1-7, 173 checks). They touch the live network only where the guard itself is under test; everything else runs on injected dependencies or a local server.
+Two scripts cover the whole chain locally, no VM required: `node smoke-e2e.mjs` (steps 1-6 in one pass, 25 checks) and `node smoke-all.mjs` (every feature of steps 1-7, 186 checks). They touch the live network only where the guard itself is under test; everything else runs on injected dependencies or a local server.
 
 ## MVP scope
 
@@ -123,20 +125,25 @@ POST /api/analyze      { url, categories } → 200 { status: "done", findings: {
                                                422 { status: "error", error: "url blocked..." }
                                                502 { status: "error", error: "analysis engine unreachable" }
 GET  /api/health       → 200 { status: "ok" }
+GET  /api/analyze      → 405 { status: "error", error: "method not allowed" }
+POST /api/health       → 405 (same shape)
+any other /api/* path  → 404 { status: "error", error: "no such route" }
 ```
 
 Full contract (findings shape, error mapping, adapter endpoints): `DOCUMENT/DESIGN.md` §5.
 
 ## Deploy summary
 
-**Frontend (from your machine, once):**
+**Frontend (from the repo root, once):**
 ```
-cd frontend
 npx wrangler login
-npx wrangler pages project create reascan
-npx wrangler pages deploy . --project-name reascan
+npx wrangler pages project create reascan   # sekali saja
+npx wrangler pages deploy frontend --project-name reascan
 → https://reascan.pages.dev
 ```
+Wrangler resolves `functions/` from the **working directory**, so the deploy must run
+at the repo root (where `functions/` lives) with `frontend/` as the asset directory —
+`cd frontend && wrangler pages deploy .` would ship the page without its API.
 
 **VM (one command):**
 ```

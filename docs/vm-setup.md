@@ -140,13 +140,14 @@ The VM keeps **zero inbound ports** — cloudflared dials out. Nothing on the VM
 ## 6. Verify
 
 ```bash
-# adapter alive locally
-curl http://localhost:8787/health
-# → { "status": "ok", "tools_available": ["fingerprint", "jsBundle"] }
+# adapter alive locally (every route needs the key, /health included)
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8787/health
+# → { "status": "ok", "tools_available": ["fingerprint","jsBundle","browserCapture","jsDeep"],
+#     "rea_tools": ["browser.capture","js.analyzeDeep"] }
 
 # adapter reachable through the tunnel
-curl https://<tunnel-hostname>/health
-# → same response
+curl -H "X-API-Key: YOUR_API_KEY" https://<tunnel-hostname>/health
+# → same response (without the key: 401)
 
 # end-to-end (needs Pages deployed with matching VM_ADAPTER_URL + API_KEY)
 curl -X POST https://reascan.pages.dev/api/analyze \

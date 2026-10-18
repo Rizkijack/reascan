@@ -163,6 +163,13 @@ test('unknown categories produce a low-confidence report rather than an error', 
     const body = await r.json();
     assert.equal(body.findings.verdict.confidence, 'low');
     assert.deepEqual(body.findings.fingerprint.findings, []);
+    // The ignored category must announce itself: a report that ran nothing
+    // without saying so reads as a real (empty) analysis — the same silent
+    // drop the evidence standard forbids for failed bundles.
+    assert.ok(
+      body.findings.verdict.limitations.some((l) => /unknown categories ignored: nonsense/.test(l)),
+      JSON.stringify(body.findings.verdict.limitations),
+    );
   });
 });
 

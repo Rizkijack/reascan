@@ -94,7 +94,7 @@ findings JSON → Pages Function balas apa adanya → render di halaman
 - Timeout 10s
 - Rate limit: **skip MVP** (andal limit 100k req/hari free tier Workers; Cloudflare zone rate limiting rules bisa ditambah nanti kalau pakai custom domain)
 
-**Proxy call:** fetch ke `VM_ADAPTER_URL` (env var = hostname tunnel) + header `X-API-Key` (wrangler secret). Timeout 60s (analisa bisa lama, tetap di bawah batas Workers I/O).
+**Proxy call:** fetch ke `VM_ADAPTER_URL` (env var = hostname tunnel) + header `X-API-Key` (wrangler secret). Timeout **75s** — engine deadline 70s + margin 5s, supaya jawaban error (504) selalu tiba sebelum edge memutus koneksi.
 
 **D1 (`d1.js`):** prepare/bind/run helpers untuk jobs + results (schema di PLAN §8).
 
@@ -295,7 +295,9 @@ export function createAdapter(env) → http.Server   // test bind ke port 0 (eph
 
 POST /analyze: auth (X-API-Key, bandingkan panjang dulu lalu crypto.timingSafeEqual)
   → validateUrl → Promise.all([fingerprint, jsBundle]) → buildVerdict → 200 JSON
-GET /health → 200 { status: 'ok', tools_available: ['fingerprint', 'jsBundle'] }
+GET /health → 200 { status: 'ok',
+  tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'],
+  rea_tools: ['browser.capture', 'js.analyzeDeep'] }
 
 // Error mapping:
 401 auth gagal | 404 route/method tidak dikenal | 422 URL blocked / body rusak / body kepanjangan
@@ -309,7 +311,8 @@ GET /health → 200 { status: 'ok', tools_available: ['fingerprint', 'jsBundle']
 oracle. Perbandingan panjang harus mendahuluinya. Ada test untuk key bertingkat panjang
 berbeda — harus 401, bukan crash.
 
-**Deadline 45 detik** untuk keseluruhan request (`REQUEST_TIMEOUT_MS`). Timeout per-fetch
+**Deadline 70 detik** untuk keseluruhan request (`REQUEST_TIMEOUT_MS`); edge membatasi 75s,
+jadi 504 selalu tiba sebelum edge memutus. Timeout per-fetch
 tidak cukup: 40 bundle ÷ 6 worker × 10s ≈ 70 detik. Caller dapat 504 alih-alih menggantung.
 Work yang sudah jalan dibiarkan (modul tidak menerima sinyal eksternal) dan tetap terbatas
 oleh timeout fetch-nya sendiri.
@@ -378,23 +381,25 @@ reascan/                       # repo root (publik, MIT)
 ├── .gitignore                     # .env, node_modules, dist, *.log, .dev.vars
 ├── smoke-e2e.mjs                  # smoke end-to-end: langkah 1-6 satu rantai
 ├── smoke-all.mjs                  # smoke fitur tiap langkah 1-7 (lokal, tanpa VM)
+├── .dev.vars.example              # template env lokal (VM_ADAPTER_URL, API_KEY)
+│
+├── functions/                     # Pages Functions (Workers runtime, auto-route /api/*)
+│   └── api/                       # di repo ROOT: wrangler mencari functions/ dari
+│       ├── analyze.js             #   working directory saat deploy           ✅
+│       ├── health.js              # GET /api/health                          ✅
+│       └── [[catchall]].js        # 404 JSON untuk /api/* tak dikenal        ✅
+│   # fase 2 tambah: api/status.js, api/result.js
 │
 ├── frontend/                  # Cloudflare Pages project (SATU deploy unit — no-conflict)
 │   ├── index.html             # 1 halaman: form + results panel          ✅
 │   ├── style.css              # tema Vercel dark (~100 baris)             ✅
 │   ├── app.js                 # fetch + render + states + localStorage   ✅
 │   ├── package.json           # type: module (ESM untuk node --test)     ✅
-│   ├── .dev.vars.example      # VM_ADAPTER_URL + API_KEY                 ✅
-│   ├── test/
-│   │   ├── analyze.test.js    # guard tests (offline, DI resolver)       ✅
-│   │   ├── proxy.test.js      # onRequestPost round-trip vs fake engine  ✅
-│   │   ├── integration.test.js # real edge function vs real adapter     ✅
-│   │   └── health.test.js     # fixed health response                    ✅
-│   └── functions/             # Pages Functions (Workers runtime, auto-route /api/*)
-│       └── api/
-│           ├── analyze.js     # handler + SSRF guard inline             ✅
-│           └── health.js      # GET /api/health (MVP, ~15 baris)         ✅
-│   # fase 2 tambah: api/status.js, api/result.js
+│   └── test/
+│       ├── analyze.test.js    # guard tests (offline, DI resolver)       ✅
+│       ├── proxy.test.js      # proxy round-trip + kontrak 404/405 JSON  ✅
+│       ├── integration.test.js # real edge function vs real adapter     ✅
+│       └── health.test.js     # fixed health response + 405              ✅
 │   # CATATAN: test TIDAK di functions/ — Pages meng-compile semua file di
 │   # sana jadi Worker route, dan import node:test akan merusak deploy.
 │
@@ -421,8 +426,8 @@ reascan/                       # repo root (publik, MIT)
 ```
 
 **Kondisi saat ini:** langkah 1–7 lengkap dan sudah lewat tes + audit — `vm-adapter/`
-(engine + server + install.sh, 63 test hijau, verified jalan lokal via `node server.js`)
-dan `frontend/` (page + Pages Functions, 26 test hijau: guard, proxy, integration,
+(engine + server + install.sh, 92 test hijau, verified jalan lokal via `node server.js`)
+dan `frontend/` (page + Pages Functions, 29 test hijau: guard, proxy, integration,
 health). Audit seluruh tree (langkah 7) selesai — lihat §8. Belum ada deploy, belum ada
 tunnel, belum ada Pages project. `install.sh` dan frontend belum pernah dieksekusi
 end-to-end di VM/Cloudflare sungguhan — itu bagian deploy (langkah 8).
@@ -458,12 +463,17 @@ sebelahan modul" (AGENTS.md).
 
 // response 502 (VM unreachable)
 { "status": "error", "error": "analysis engine unreachable" }
+
+// method salah pada rute yang dikenal (GET /api/analyze, POST /api/health)
+{ "status": "error", "error": "method not allowed" }    // HTTP 405
+// /api/* yang tidak dikenal (functions/api/[[catchall]].js)
+{ "status": "error", "error": "no such route" }          // HTTP 404
 ```
 
 ### POST /analyze (Pages Function → VM adapter)
 ```json
 // header: X-API-Key
-{ "url": "...", "categories": [...], "jobId": "uuid" }
+{ "url": "...", "categories": [...] }   // jobId: fase 2 (async + D1) — MVP tidak mengirim
 // response
 { "status": "ok", "findings": {...}, "duration_ms": 1234 }
 ```
@@ -596,7 +606,7 @@ Frontend merender kedua section ini tanpa `innerHTML` (nilai capture bersifat ta
 - [x] `.env.example` — API_KEY, PORT, HOST
 
 **Selesai — Pages (`frontend/`):**
-- [x] `index.html`, `style.css`, `app.js`, `package.json`, `.dev.vars.example`
+- [x] `index.html`, `style.css`, `app.js`, `package.json` (`.dev.vars.example` di root repo)
 - [x] `functions/api/analyze.js` — handler + SSRF guard (export `validateUrl`)
 - [x] `functions/api/health.js` — respons tetap
 - [x] `test/analyze.test.js` — guard offline (DI resolver)
@@ -604,10 +614,11 @@ Frontend merender kedua section ini tanpa `innerHTML` (nilai capture bersifat ta
 - [x] `test/integration.test.js` — edge asli vs adapter asli (temuan audit langkah 7)
 - [x] `test/health.test.js` — kontrak health
 
-**Belum:**
-- [ ] Deploy Cloudflare Pages + tunnel VM (langkah 8)
+**Deploy (langkah 8) — selesai:**
+- [x] Pages live di reascan.pages.dev; tunnel quick + sinkronisasi secret/redeploy
+  otomatis lewat `vm-adapter/windows/reascan-tunnel.ps1`
 
-**Test:** 63 passing di `vm-adapter/` + 22 passing di `frontend/`. SSRF guard adapter
+**Test:** 92 passing di `vm-adapter/` + 29 passing di `frontend/`. SSRF guard adapter
 diuji offline (denylist, IPv4-mapped, IPv4-compatible, encoding alternatif, redirect ke
 metadata) plus verifikasi live lewat httpbin; `server.test.js` terakhir memakai jaringan
 sungguhan. Edge guard (`frontend/test/analyze.test.js`) full offline — DNS di-inject
@@ -618,7 +629,7 @@ status, body rusak); `frontend/test/health.test.js` mengunci respons health yang
 (401 yang di-remap ke 502, kontrak tidak melebar, evidence standard pada temuan).
 
 **Smoke lokal (tanpa VM):** `node smoke-e2e.mjs` — rantai langkah 1-6, 25 cek.
-`node smoke-all.mjs` - 173 cek fitur untuk langkah 1-7, termasuk `app.js` dijalankan di
+`node smoke-all.mjs` - 186 cek fitur untuk langkah 1-7, termasuk `app.js` dijalankan di
 DOM shim (submit sukses/gagal, riwayat, clear) dan blok `.env` milik `install.sh`
 dieksekusi di direktori sementara. Jaringan hanya dipakai saat guard-nya sendiri yang
 diuji (DNS, TLS, redirect hop, analisa live example.com); sisanya injeksi dependency atau
@@ -631,8 +642,9 @@ eksternal (semua import `node:` atau relatif); nol `console.*` di path produksi;
 tanpa owner; denylist identik di dua tempat (test parity mengunci); `AGENTS.md` tidak
 ter-track; tidak ada skor numerik; secret-pattern detection tetap absen. Temuan: dua
 indentasi komentar yang rusak (`fingerprint.js`, `jsBundle.js`) — diperbaiki. Batasan yang
-tetap ada: build `wrangler pages` belum pernah dijalankan, `install.sh` belum dieksekusi di
-VM ber-systemd, dan `app.js` belum diuji unit (tanpa DOM di Node).
+tetap ada: `install.sh` belum dieksekusi di VM ber-systemd (adapter + tunnel berjalan
+sebagai scheduled task Windows), dan `app.js` belum diuji unit (tanpa DOM di Node —
+tercakup DOM shim di smoke-all).
 
 **Mapping error edge (keputusan audit):** `analyze.js` TIDAK meneruskan status engine apa
 adanya. Kontrak publik §5 hanya mengizinkan 200/422/502, jadi 422 engine tetap 422
@@ -672,10 +684,11 @@ Prinsip: **SATU Pages project = frontend statis + Pages Functions (API) = satu f
 
 ### 10.2 Deploy Pages (satu perintah)
 ```
-cd frontend
 npx wrangler login                          # OAuth sekali, buka browser
 npx wrangler pages project create reascan   # sekali saja
-npx wrangler pages deploy . --project-name reascan
+# jalankan dari repo root — wrangler mencari functions/ dari working directory,
+# jadi asset dir (frontend/) diberikan sebagai argument, bukan jadi cwd
+npx wrangler pages deploy frontend --project-name reascan
 ```
 Hasil: https://reascan.pages.dev — frontend + /api/analyze live dalam satu deploy.
 

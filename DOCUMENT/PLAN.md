@@ -133,7 +133,7 @@ GET /api/health                                      ← MVP (pure proxy check)
 ```
 POST /analyze
   header: X-API-Key
-  body: { url: string, categories: string[], jobId: string }
+  body: { url: string, categories: string[] }   # jobId: fase 2 (async + D1), MVP tidak mengirim
   response: { status, findings: {...}, duration_ms }
 
 GET /health
@@ -194,7 +194,7 @@ Layer 1 (Workers, sebelum forward ke VM) — **implementasi: `functions/api/anal
 - [x] Blokir scheme non-http(s): file://, gopher://, ftp://
 - [x] Blokir redirect ke internal: follow redirect manual, validasi tiap hop — **di adapter (Layer 3, `safeFetch`)**, bukan di edge; edge tidak pernah fetch target, jadi hop-walk di sana dead code
 - [x] ~~Rate limit per IP + global cap~~ — skip MVP (free tier 100k req/hari = pembatas alami; Cloudflare zone rules saat custom domain)
-- [x] Timeout fetch ketat — 10 detik per-fetch di adapter; edge→engine 60 detik (engine deadline 45 detik) supaya tunnel mati tidak menggantung browser
+- [x] Timeout fetch ketat — 10 detik per-fetch di adapter; edge→engine 75 detik (engine deadline 70 detik) supaya tunnel mati tidak menggantung browser
 
 Layer 2 (VM network policy):
 - [ ] VM egress: hanya keluar via proxy yang enforce denylist yang sama

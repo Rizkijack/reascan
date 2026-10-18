@@ -14,10 +14,14 @@ import { fingerprint } from './modules/fingerprint.js';
 import { analyzeBundles } from './modules/jsBundle.js';
 import { callReaTool, REA_TOOLS } from './lib/reaMcp.js';
 
-// The Pages Function allows this request 60s end to end, so the two analyses share
+// The Pages Function allows this request 75s end to end, so the two analyses share
 // one budget rather than each getting a full slice of it.
 const REQUEST_TIMEOUT_MS = 70000;
 const MAX_BODY_BYTES = 8192;
+
+// The four categories this engine can actually run — the same list the form
+// ships as checkboxes. Anything else a client asks for is reported, never run.
+const KNOWN_CATEGORIES = ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'];
 
 // Comparing lengths first is not optional: timingSafeEqual throws on buffers of
 // different lengths, and branching on length alone would be a shorter oracle than
@@ -108,6 +112,13 @@ async function handleAnalyze(req, res, env) {
     ? payload.categories
     : ['fingerprint', 'jsBundle'];
 
+  // A category this engine does not know must not vanish silently: without
+  // this, categories ['nonsense'] produced a 200 "done" report that ran
+  // nothing and said nothing — an empty result reading as a real analysis,
+  // which is exactly what the evidence standard forbids (same rule as a
+  // dropped limitation).
+  const unknownCategories = [...new Set(requested.filter((c) => !KNOWN_CATEGORIES.includes(c)))];
+
   // Both modules take url first and a guard second; categories decide which run,
   // not how they are called. A throw from either degrades to an empty result so
   // one broken category cannot cost the caller the whole report.
@@ -174,6 +185,9 @@ async function handleAnalyze(req, res, env) {
   }
 
   const limitations = [...fp.limitations, ...bundles.limitations, ...browser.limitations, ...jsDeep.limitations];
+  if (unknownCategories.length) {
+    limitations.push(`unknown categories ignored: ${unknownCategories.join(', ')} (known: ${KNOWN_CATEGORIES.join(', ')})`);
+  }
   const verdict = buildVerdict(fp.findings, limitations);
 
   return send(res, 200, {

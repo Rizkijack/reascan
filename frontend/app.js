@@ -12,6 +12,12 @@
 const HISTORY_KEY = 'reascan:history';
 const HISTORY_MAX = 50;
 
+// Client-side deadline for one analysis. The edge gives up on the engine at
+// 75s and answers 502, so a healthy chain always replies well before this —
+// the timer only catches a hung edge or proxy, which would otherwise leave
+// the spinner up until the browser's own multi-minute fetch timeout.
+const ANALYZE_TIMEOUT_MS = 80000;
+
 const state = { phase: 'idle', findings: null, error: null };
 
 const $ = (id) => document.getElementById(id);
@@ -404,11 +410,14 @@ async function handleSubmit(e) {
   state.phase = 'loading';
   render();
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
   try {
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ url: url.toString(), categories }),
+      signal: controller.signal,
     });
 
     let data;
@@ -435,7 +444,11 @@ async function handleSubmit(e) {
     }
   } catch (err) {
     state.phase = 'error';
-    state.error = `could not reach the analyzer: ${err.message}`;
+    state.error = err?.name === 'AbortError'
+      ? `the analyzer did not answer within ${Math.round(ANALYZE_TIMEOUT_MS / 1000)}s — try again`
+      : `could not reach the analyzer: ${err.message}`;
+  } finally {
+    clearTimeout(timer);
   }
 
   render();

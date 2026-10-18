@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 
-import { onRequestPost } from '../../functions/api/analyze.js';
+import { onRequestPost, onRequestGet } from '../../functions/api/analyze.js';
+import { onRequest as apiNotFound } from '../../functions/api/[[catchall]].js';
 
 // onRequestPost uses only web APIs (Request/Response/fetch/AbortController) plus
 // node:dns, so it runs under node:test against a real local server. This is the
@@ -185,4 +186,25 @@ test('a non-object JSON adapter reply is a 502, not a 500 crash', async () => {
       },
     );
   }
+});
+
+// --- every /api/* reply is JSON -------------------------------------------
+// Pages falls back to static assets when no function (or no method handler)
+// matches, so without these two handlers a wrong method or a typo'd path
+// answered 200 text/html — the page's own index — while the local dev server
+// answered JSON. The divergence was invisible in tests and fatal to a client
+// that parses every /api/* reply as JSON.
+
+test('GET on the analyze route answers 405 JSON, not the static page', async () => {
+  const res = await onRequestGet();
+  assert.equal(res.status, 405);
+  assert.match(res.headers.get('content-type'), /application\/json/);
+  assert.deepEqual(await res.json(), { status: 'error', error: 'method not allowed' });
+});
+
+test('an unknown /api path answers 404 JSON, not the page index', async () => {
+  const res = await apiNotFound();
+  assert.equal(res.status, 404);
+  assert.match(res.headers.get('content-type'), /application\/json/);
+  assert.deepEqual(await res.json(), { status: 'error', error: 'no such route' });
 });

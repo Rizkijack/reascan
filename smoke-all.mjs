@@ -788,7 +788,7 @@ group('security invariants');
   const files = [
     'vm-adapter/server.js', 'vm-adapter/lib/urlGuard.js', 'vm-adapter/lib/body.js', 'vm-adapter/lib/reaMcp.js',
     'vm-adapter/modules/fingerprint.js', 'vm-adapter/modules/jsBundle.js',
-    'functions/api/analyze.js', 'functions/api/health.js', 'frontend/app.js',
+    'functions/api/analyze.js', 'functions/api/health.js', 'functions/api/[[catchall]].js', 'frontend/app.js',
   ];
   const src = Object.fromEntries(files.map((f) => [f, readFileSync(f, 'utf8')]));
 

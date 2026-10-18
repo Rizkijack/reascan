@@ -27,7 +27,10 @@ function Write-Log([string]$msg) {
 if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
 
 # reascan-adapter.ps1 needs the npm prefix for the same reason (resolveSpawn);
-# here it is wrangler, which the secret sync and the redeploy both call.
+# here it is wrangler, which the secret sync and the redeploy both call. The
+# boot-triggered task does not inherit an interactive PATH, so the npm prefix is
+# prepended explicitly — and the sync block below still falls back to npx when
+# `wrangler` itself is not resolvable.
 foreach ($candidate in @('C:\Program Files\nodejs\node.exe', "$env:LOCALAPPDATA\Programs\nodejs\node.exe")) {
   if (Test-Path $candidate) { $env:PATH = "$(Split-Path $candidate -Parent);G:\NPMGLOBAL;" + $env:PATH; break }
 }
@@ -86,18 +89,47 @@ while ($true) {
 
   if ($url -ne $lastAdvertised) {
     Write-Log "tunnel URL: $url"
-    try {
-      Push-Location $repo
-      $url | & wrangler pages secret put VM_ADAPTER_URL --project-name $project 2>&1 |
-        Out-File -FilePath $log -Append -Encoding UTF8
-      & wrangler pages deploy $assetsDir --project-name $project --branch main --commit-dirty=true 2>&1 |
-        Select-Object -Last 3 | Out-File -FilePath $log -Append -Encoding UTF8
-      $lastAdvertised = $url
-      Write-Log 'VM_ADAPTER_URL refreshed and Pages redeployed'
-    } catch {
-      Write-Log "secret/redeploy sync failed: $($_.Exception.Message) - retrying on the next tunnel start"
-    } finally {
-      Pop-Location
+    # Resolve wrangler once, with an npx fallback: when this sync failed with
+    # "wrangler is not recognized" the live site silently kept the previous
+    # (dead) tunnel URL until the next restart. A failed attempt is also
+    # retried in place — waiting for "the next tunnel start" can mean hours.
+    $wranglerCmd = Get-Command wrangler -ErrorAction SilentlyContinue
+    if ($wranglerCmd) {
+      $exe = $wranglerCmd.Source
+      $prefix = @()
+    } else {
+      Write-Log 'wrangler not on PATH - falling back to npx --yes wrangler'
+      $exe = 'npx'
+      $prefix = @('--yes', 'wrangler')
+    }
+
+    $attempt = 0
+    while ($url -ne $lastAdvertised -and -not $proc.HasExited -and $attempt -lt 6) {
+      $attempt++
+      try {
+        Push-Location $repo
+        $url | & $exe @prefix pages secret put VM_ADAPTER_URL --project-name $project 2>&1 |
+          Out-File -FilePath $log -Append -Encoding UTF8
+        # A native command that exits non-zero does not throw; without these
+        # checks the failure was recorded as a successful sync.
+        if ($LASTEXITCODE -ne 0) { throw "wrangler secret put exited $LASTEXITCODE" }
+        & $exe @prefix pages deploy $assetsDir --project-name $project --branch main --commit-dirty=true 2>&1 |
+          Select-Object -Last 3 | Out-File -FilePath $log -Append -Encoding UTF8
+        if ($LASTEXITCODE -ne 0) { throw "wrangler deploy exited $LASTEXITCODE" }
+        $lastAdvertised = $url
+        Write-Log 'VM_ADAPTER_URL refreshed and Pages redeployed'
+      } catch {
+        Write-Log "secret/redeploy sync failed (attempt $attempt): $($_.Exception.Message)"
+        if ($url -ne $lastAdvertised -and -not $proc.HasExited -and $attempt -lt 6) {
+          Write-Log 'retrying the sync in 30s - the live site still points at the old tunnel'
+          Start-Sleep -Seconds 30
+        }
+      } finally {
+        Pop-Location
+      }
+    }
+    if ($url -ne $lastAdvertised) {
+      Write-Log "sync still not applied after $attempt attempt(s) - will retry when the tunnel restarts"
     }
   } else {
     Write-Log "tunnel URL unchanged ($url)"
