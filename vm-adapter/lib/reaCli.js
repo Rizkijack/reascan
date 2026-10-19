@@ -275,9 +275,18 @@ function distilCapture(envelope) {
 export async function analyzeJsDeep(url, safeFetch, { timeoutMs = 60000, maxBundles = 5, maxBytes = 2_000_000 } = {}) {
   const { extractScripts } = await import('../modules/jsBundle.js');
 
+  // `timeoutMs` is this caller's budget for the WHOLE category, not just for the
+  // REA subprocess. server.js hands us REQUEST_TIMEOUT_MS - 5000 and races the
+  // result against its own deadline, so a call that spends its time downloading
+  // bundles and then asks REA for a fresh full-length timeout can run past that
+  // deadline — which rejects Promise.all and 504s the entire report, not just
+  // jsDeep. Charging every phase against one deadline keeps the promise honest.
+  const deadlineAt = Date.now() + timeoutMs;
+  const remaining = () => Math.max(0, deadlineAt - Date.now());
+
   const dir = await mkdtemp(join(tmpdir(), 'reascan-jsdeep-'));
   try {
-    const page = await safeFetch(url, { timeoutMs: 10000 });
+    const page = await safeFetch(url, { timeoutMs: Math.min(10000, remaining()) });
     if (!page.ok) return { ok: false, reason: `page fetch failed: ${page.reason}` };
     if (!page.response.ok) return { ok: false, reason: `page fetch returned HTTP ${page.response.status}` };
 
@@ -296,8 +305,10 @@ export async function analyzeJsDeep(url, safeFetch, { timeoutMs = 60000, maxBund
 
     let downloaded = 0;
     for (const [i, src] of scripts.entries()) {
+      // Stops on the clock; `downloaded` below reports how far it got.
+      if (remaining() <= 0) break;
       try {
-        const fetched = await safeFetch(src, { timeoutMs: 10000 });
+        const fetched = await safeFetch(src, { timeoutMs: Math.min(10000, remaining()) });
         if (!fetched.ok || !fetched.response.ok) continue;
         const bchunks = [];
         let bsize = 0;
@@ -314,7 +325,11 @@ export async function analyzeJsDeep(url, safeFetch, { timeoutMs = 60000, maxBund
       return { ok: false, reason: 'none of the page bundles could be downloaded' };
     }
 
-    const run = await runReaJson(['analyze-javascript-application', dir], { timeoutMs });
+    const budget = remaining();
+    if (budget <= 0) {
+      return { ok: false, reason: `downloading bundles used the whole ${timeoutMs}ms budget before REA could run` };
+    }
+    const run = await runReaJson(['analyze-javascript-application', dir], { timeoutMs: budget });
     if (!run.ok) return run;
     return { ok: true, analysis: distilJsAnalysis(run.envelope, downloaded) };
   } finally {
