@@ -1,35 +1,37 @@
 /* reascan — design tokens. Single source of truth for color, type, space, radii. */
 
 :root {
-  /* ---- color: dark theme (no pure black, no pure white text) ---- */
-  --bg-base: #0b0d12;
-  --bg-surface: #11141b;
-  --bg-elevated: #171b24;
-  --bg-input: #0d1017;
+  /* ---- color: dark neutral base (off-black, never pure #000/#fff) ---- */
+  --bg-base: #090b0e;
+  --bg-surface: #0f1216;
+  --bg-elevated: #151920;
+  --bg-input: #0b0e12;
 
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  --border: rgba(232, 238, 236, 0.08);
+  --border-strong: rgba(232, 238, 236, 0.16);
 
-  --text-primary: #e8eaf0;
-  --text-secondary: #9aa3b2;
-  --text-muted: #6b7385;
+  --text-primary: #e8ebe9;
+  --text-secondary: #99a1a5;
+  --text-muted: #68707a;
 
-  --accent: #6366f1;
-  --accent-2: #8b5cf6;
-  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  --accent-soft: rgba(99, 102, 241, 0.12);
-  --accent-glow: rgba(99, 102, 241, 0.35);
+  /* One accent, saturation kept under 80%. No gradient, no glow tokens —
+     depth comes from 1px borders and tinted shadows only. */
+  --accent: #34d399;
+  --accent-ink: #052e20;
+  --accent-soft: rgba(52, 211, 153, 0.1);
+  --accent-line: rgba(52, 211, 153, 0.35);
 
+  /* Semantic status colors (evidence standard vocabulary, not decoration). */
   --ok: #34d399;
   --ok-soft: rgba(52, 211, 153, 0.1);
-  --warn: #f5a623;
-  --warn-soft: rgba(245, 166, 35, 0.1);
-  --danger: #f87171;
-  --danger-soft: rgba(248, 113, 113, 0.1);
+  --warn: #f0b429;
+  --warn-soft: rgba(240, 180, 41, 0.1);
+  --danger: #f26d6d;
+  --danger-soft: rgba(242, 109, 109, 0.1);
 
   /* ---- typography ---- */
   --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* 1.25 type scale */
@@ -59,9 +61,12 @@
   --content-width: 880px;
 
   /* ---- radii ---- */
-  --radius-card: 12px;
-  --radius-control: 8px;
+  --radius-card: 14px;
+  --radius-control: 10px;
   --radius-pill: 999px;
+
+  /* ---- depth (tinted, never a neon outer glow) ---- */
+  --shadow-panel: 0 24px 48px -28px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 
   /* ---- motion ---- */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -69,5 +74,5 @@
   --duration-base: 250ms;
 
   /* ---- focus ---- */
-  --focus-ring: 0 0 0 3px rgba(99, 102, 241, 0.45);
+  --focus-ring: 0 0 0 3px rgba(52, 211, 153, 0.35);
 }

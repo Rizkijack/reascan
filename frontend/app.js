@@ -87,24 +87,32 @@ function renderHistory() {
   section.hidden = history.length === 0 && !historyNotice;
 
   if (historyNotice) {
-    list.append(el('li', 'history-notice', historyNotice));
+    list.append(el('div', 'history-notice', historyNotice));
   }
 
+  if (!history.length) return;
+
+  // History is a compact table: target · confidence · when. The whole target
+  // cell is one button, so a row is still keyboard-reachable and the click
+  // handler that re-renders the stored report lives in exactly one place.
+  const holder = el('div', 'table-wrap');
+  const table = el('table', 'report-table history-table');
+
+  const thead = document.createElement('thead');
+  const head = document.createElement('tr');
+  for (const label of ['Target', 'Confidence', 'When']) head.append(el('th', null, label));
+  thead.append(head);
+  table.append(thead);
+
+  const tbody = document.createElement('tbody');
   for (const entry of history) {
-    const li = document.createElement('li');
+    const row = document.createElement('tr');
+
+    const target = document.createElement('td');
     const btn = document.createElement('button');
     btn.type = 'button';
-
-    const url = document.createElement('span');
-    url.className = 'url';
-    url.textContent = entry.url ?? '(unknown url)';
-
-    const meta = document.createElement('span');
-    meta.className = 'meta';
-    const when = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '';
-    meta.textContent = `${entry.confidence ?? '?'} · ${when}`;
-
-    btn.append(url, meta);
+    btn.className = 'history-open';
+    btn.append(el('span', 'url', entry.url ?? '(unknown url)'));
     btn.addEventListener('click', () => {
       state.phase = 'done';
       state.findings = entry.findings;
@@ -112,10 +120,22 @@ function renderHistory() {
       render();
       $('results').scrollIntoView({ behavior: 'smooth' });
     });
+    target.append(btn);
 
-    li.append(btn);
-    list.append(li);
+    const conf = entry.confidence ?? 'unknown';
+    const confCell = document.createElement('td');
+    confCell.append(el('span', `chip conf-${conf}`, conf));
+
+    const whenCell = document.createElement('td');
+    const when = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '—';
+    whenCell.append(el('span', 'when', when));
+
+    row.append(target, confCell, whenCell);
+    tbody.append(row);
   }
+  table.append(tbody);
+  holder.append(table);
+  list.append(holder);
 }
 
 // --- rendering --------------------------------------------------------------
@@ -170,25 +190,35 @@ function renderFingerprint(fp) {
   wrap.append(el('h3', null, 'Fingerprint'));
 
   if (fp.findings?.length) {
+    const holder = el('div', 'table-wrap');
     const table = document.createElement('table');
+    table.className = 'report-table';
+
+    const thead = document.createElement('thead');
     const head = document.createElement('tr');
     for (const label of ['Key', 'Value', 'Type', 'Evidence', 'Confidence']) {
       head.append(el('th', null, label));
     }
-    table.append(head);
+    thead.append(head);
+    table.append(thead);
 
+    const tbody = document.createElement('tbody');
     for (const f of fp.findings) {
+      // Type and confidence render as chips so the evidence vocabulary reads at
+      // a glance; the text content is unchanged, only the styling hook differs.
       const row = document.createElement('tr');
       row.append(
-        el('td', null, String(f.key)),
+        el('td', 'key', String(f.key)),
         el('td', null, Array.isArray(f.value) ? f.value.join(', ') : String(f.value)),
-        el('td', null, String(f.type)),
-        el('td', null, String(f.evidence)),
-        el('td', null, String(f.confidence)),
+        el('td', 'type', el('span', `chip et-${f.type}`, String(f.type))),
+        el('td', 'evidence', String(f.evidence)),
+        el('td', 'conf', el('span', `chip conf-${f.confidence}`, String(f.confidence))),
       );
-      table.append(row);
+      tbody.append(row);
     }
-    wrap.append(table);
+    table.append(tbody);
+    holder.append(table);
+    wrap.append(holder);
   }
 
   if (fp.tls) {

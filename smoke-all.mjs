@@ -685,6 +685,13 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   check('success path reveals the results panel', els['results'].hidden === false);
   check('verdict badge shows the confidence', els['verdict'].textContent.includes('medium'));
   check('fingerprint row is rendered with its evidence', els['findings-body'].textContent.includes('evidence') || els['findings-body'].all.some((e) => e.textContent.includes('Server header')));
+  // The findings table is the report's centerpiece: a real table (thead over
+  // tbody) whose type/confidence cells carry the chip classes style.css paints.
+  check('fingerprint table has a head and typed chips',
+    els['findings-body'].all.some((e) => e.tagName === 'THEAD')
+      && els['findings-body'].all.some((e) => String(e.className).includes('chip et-observation'))
+      && els['findings-body'].all.some((e) => String(e.className).includes('chip conf-high')));
+  check('style.css styles the table chips', /\.chip\.et-observation\s*\{/.test(readFileSync('frontend/style.css', 'utf8')));
   // Limitations/unknowns are part of the verdict block, not the findings body.
   const verdictText = els['verdict'].textContent;
   check('limitations and unknowns are shown', verdictText.includes('CDN hides the origin') && verdictText.includes('Does /api/v1/users need auth'), verdictText.slice(0, 80));
@@ -719,9 +726,17 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   check('history saved to localStorage', JSON.parse(store.get('reascan:history') ?? '[]').length === 1);
   check('history list is visible with one entry', els['history-section'].hidden === false && els['history-list'].children.length === 1);
 
-  const entryButtons = els['history-list'].children[0].children[0];
+  // History renders as a table now, so the clickable element is the target
+  // cell's button wherever it sits in the tree — locate it instead of assuming
+  // a fixed depth.
+  const historyBtn = els['history-list'].all.find((e) => e.tagName === 'BUTTON');
+  check('history renders as a table with a row-level button',
+    Boolean(historyBtn)
+      && els['history-list'].all.some((e) => e.tagName === 'TABLE')
+      && els['history-list'].all.some((e) => String(e.className).includes('history-table')));
+  check('style.css styles the history table', /\.history-table\s+td\s*\{/.test(readFileSync('frontend/style.css', 'utf8')));
   els['results'].hidden = true;
-  entryButtons.fire('click');
+  historyBtn?.fire('click');
   check('clicking a history entry re-renders it', els['results'].hidden === false && els['verdict'].textContent.includes('medium'));
 
   fetchImpl = async () => ({ status: 422, json: async () => ({ status: 'error', error: 'url blocked: resolves to private IP 10.0.0.5' }) });

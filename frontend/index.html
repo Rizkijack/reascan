@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
     rel="stylesheet"
   />
   <link rel="stylesheet" href="tokens.css" />
@@ -33,23 +33,70 @@
   <main>
     <section class="hero" aria-labelledby="hero-heading">
       <div class="container hero-inner">
-        <p class="eyebrow">Web stack &amp; JS bundle analysis</p>
-        <h1 id="hero-heading">Evidence, not scores.</h1>
-        <p class="lede">
-          Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle
-          inventory, browser capture, and deep static analysis — with explicit
-          limitations and unknowns.
-        </p>
-        <div class="hero-ctas">
-          <a href="#analyze" class="btn btn-primary">Analyze a URL</a>
-          <a href="https://github.com/Rizkijack/reascan" class="btn btn-secondary" target="_blank" rel="noopener">Star on GitHub</a>
+        <div class="hero-copy">
+          <p class="eyebrow rise">Web stack &amp; JS bundle analysis</p>
+          <h1 id="hero-heading" class="rise">Evidence, not scores.</h1>
+          <p class="lede rise">
+            Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle
+            inventory, browser capture, and deep static analysis — with explicit
+            limitations and unknowns.
+          </p>
+          <div class="hero-ctas rise">
+            <a href="#analyze" class="btn btn-primary">Analyze a URL</a>
+            <a href="https://github.com/Rizkijack/reascan" class="btn btn-secondary" target="_blank" rel="noopener">Star on GitHub</a>
+          </div>
+          <ul class="hero-points rise" aria-label="Analysis categories">
+            <li>Fingerprint</li>
+            <li>JS bundles</li>
+            <li>Browser capture</li>
+            <li>Deep analysis</li>
+          </ul>
         </div>
-        <ul class="hero-points" aria-label="Analysis categories">
-          <li>Fingerprint</li>
-          <li>JS bundles</li>
-          <li>Browser capture</li>
-          <li>Deep analysis</li>
-        </ul>
+
+        <!-- Specimen report: static sample data showing what a finding row looks
+             like. Decorative preview of the real report below, so screen readers
+             are told to skip it. -->
+        <div class="specimen hero-specimen rise" aria-hidden="true">
+          <div class="specimen-bar">
+            <span class="pulse"></span>
+            <span class="host">example.com</span>
+            <span>· fingerprint</span>
+          </div>
+          <div class="table-wrap">
+            <table class="report-table">
+              <thead>
+                <tr><th>Key</th><th>Value</th><th>Type</th><th>Confidence</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="key">server</td>
+                  <td>nginx/1.25.3</td>
+                  <td><span class="chip et-observation">observation</span></td>
+                  <td><span class="chip conf-high">high</span></td>
+                </tr>
+                <tr>
+                  <td class="key">cdn</td>
+                  <td>Cloudflare</td>
+                  <td><span class="chip et-observation">observation</span></td>
+                  <td><span class="chip conf-high">high</span></td>
+                </tr>
+                <tr>
+                  <td class="key">framework</td>
+                  <td>Next.js 14.2.3</td>
+                  <td><span class="chip et-derivation">derivation</span></td>
+                  <td><span class="chip conf-medium">medium</span></td>
+                </tr>
+                <tr>
+                  <td class="key">js_runtime</td>
+                  <td>es2022 modules</td>
+                  <td><span class="chip et-derivation">derivation</span></td>
+                  <td><span class="chip conf-medium">medium</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="specimen-foot">sample data · every row carries its evidence</div>
+        </div>
       </div>
     </section>
 
@@ -57,7 +104,7 @@
       <section class="panel card reveal" id="analyze" aria-labelledby="form-heading">
         <h2 id="form-heading">Analyze a URL</h2>
         <form id="analyze-form" novalidate>
-          <label for="target-url" class="sr-only">Target URL</label>
+          <label for="target-url" class="form-label">Target URL</label>
           <div class="form-row">
             <input
               id="target-url"
@@ -85,7 +132,7 @@
 
       <section id="history-section" class="panel card reveal" aria-labelledby="history-heading" hidden>
         <h2 id="history-heading">History <button type="button" id="clear-history" class="link-btn">clear</button></h2>
-        <ul id="history-list" class="history"></ul>
+        <div id="history-list" class="history"></div>
       </section>
 
       <section id="results" class="panel card reveal" aria-labelledby="results-heading" hidden>

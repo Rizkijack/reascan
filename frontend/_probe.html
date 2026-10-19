@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><meta charset="utf-8" />
+<link rel="stylesheet" href="tokens.css" />
+<link rel="stylesheet" href="style.css" />
+</head><body>
+<div class="specimen hero-specimen">
+  <div class="specimen-bar"><span class="pulse"></span><span class="host">example.com</span><span>· fingerprint</span></div>
+  <div class="table-wrap">
+    <table class="report-table">
+      <thead><tr><th>Key</th><th>Value</th><th>Type</th><th>Confidence</th></tr></thead>
+      <tbody>
+        <tr><td class="key">server</td><td>nginx/1.25.3</td><td><span class="chip et-observation">observation</span></td><td><span class="chip conf-high">high</span></td></tr>
+        <tr><td class="key">cdn</td><td>Cloudflare</td><td><span class="chip et-observation">observation</span></td><td><span class="chip conf-high">high</span></td></tr>
+        <tr><td class="key">framework</td><td>Next.js 14.2.3</td><td><span class="chip et-derivation">derivation</span></td><td><span class="chip conf-medium">medium</span></td></tr>
+        <tr><td class="key">js_runtime</td><td>es2022 modules</td><td><span class="chip et-derivation">derivation</span></td><td><span class="chip conf-medium">medium</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="specimen-foot">sample data</div>
+</div>
+<pre id="probe"></pre>
+<script>
+const r = (el) => { const b = el.getBoundingClientRect(); return `${el.tagName}.${el.className || '-'} y=${Math.round(b.y)} h=${Math.round(b.height)}`; };
+const spec = document.querySelector('.specimen');
+const lines = [r(spec), ...[...spec.querySelectorAll('*')].map(r)];
+document.getElementById('probe').textContent = lines.join('\n');
+</script>
+</body></html>
