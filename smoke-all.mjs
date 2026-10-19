@@ -788,48 +788,61 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   if (realLocalStorage === undefined) delete globalThis.localStorage; else globalThis.localStorage = realLocalStorage;
   check('shim globals are restored', globalThis.fetch === realFetch);
 
-  const html = readFileSync('frontend/index.html', 'utf8');
-  const ids = [...html.matchAll(/id="([a-z-]+)"/g)].map((m) => m[1]);
-  check('index.html provides every id app.js looks up', Object.keys(els).every((id) => ids.includes(id)), Object.keys(els).filter((id) => !ids.includes(id)).join(','));
+  const html = readFileSync('frontend/index.html', 'utf8'); // main page: hero + how it works + Open app
+  const app = readFileSync('frontend/app.html', 'utf8');     // the analyzer page
+  const ids = [...app.matchAll(/id="([a-z-]+)"/g)].map((m) => m[1]);
+  check('app.html provides every id app.js looks up', Object.keys(els).every((id) => ids.includes(id)), Object.keys(els).filter((id) => !ids.includes(id)).join(','));
   check('app.js renders with textContent only (no innerHTML sink)', !/\.innerHTML\s*=/.test(readFileSync('frontend/app.js', 'utf8')));
-  check('style.css is linked and non-trivial', /style\.css/.test(html) && readFileSync('frontend/style.css', 'utf8').length > 2000);
+  check('style.css is linked and non-trivial', /style\.css/.test(html) && /style\.css/.test(app) && readFileSync('frontend/style.css', 'utf8').length > 2000);
 
-  // --- how.html: the second page is a contract too ---------------------------
-  // Multi-page means the two pages must stay wired together: nav links resolve
-  // in both directions, every locally referenced asset ships, the theme +
-  // background stack is present (it is what makes the pages feel like one site),
-  // and the copy rules (single accent, no em-dash) hold page-wide.
-  group('how it works page contract');
+  // --- multi-page contract: main (how it works) <-> app (analyzer) ----------
+  // The main page is the how-it-works page and the entry point to the app:
+  // the Open app feature resolves in both directions, every locally referenced
+  // asset ships, the analyzer markup lives only on app.html, the theme +
+  // background stack is present on both (it is what makes the pages feel like
+  // one site), and the copy rules (single accent, no em-dash) hold page-wide.
+  group('main (how it works) and app page contract');
 
-  const how = readFileSync('frontend/how.html', 'utf8');
-  check('how.html exists and links back to the analyzer', /href="index\.html#analyze"/.test(how) && /href="index\.html"/.test(how));
-  check('index.html links to the how page', /href="how\.html"/.test(html));
-  // Findings is part of the analyze page by design: the section keeps its id
-  // (app.js targets it), the nav no longer carries a separate anchor link.
-  check('findings section stays on the analyze page (id app.js targets)', /id="results"/.test(html));
-  check('no separate Findings nav entry left behind (merged into Analyze)', !/href="#results"/.test(html));
+  check('the main page links to the app (Open app feature)', /href="app\.html/.test(html));
+  check('the app links back to the how-it-works anchor on the main page', /href="index\.html#how"/.test(app));
+  check('the main page carries the how-it-works sections', /id="how"/.test(html) && /class="[^"]*\bchain-node\b/.test(html) && /class="[^"]*\bstage\b/.test(html));
+  // The analyzer markup keeps its ids on app.html; app.js targets them there.
+  check('the analyzer markup lives on app.html (form + findings ids)', /id="analyze-form"/.test(app) && /id="results"/.test(app));
+  check('the main page carries no analyzer markup and does not load app.js',
+    !/id="analyze-form"/.test(html) && !/id="results"/.test(html) && !/src="app\.js"/.test(html));
+  check('no separate Findings nav entry left behind', !/href="#results"/.test(html) && !/href="#results"/.test(app));
+  check('app.js loads only on the app page', /src="app\.js"/.test(app) && !/src="app\.js"/.test(html));
 
-  const assets = [...how.matchAll(/(?:href|src)="([^"#]+?)"/g)]
-    .map((m) => m[1])
-    .filter((u) => !/^https?:|^\/|^mailto:|^data:/.test(u));
-  const missing = assets.filter((u) => !existsSync(join('frontend', u)));
-  check('every local asset referenced by how.html ships', missing.length === 0, missing.join(','));
+  for (const page of ['index.html', 'app.html']) {
+    const doc = page === 'index.html' ? html : app;
+    const assets = [...doc.matchAll(/(?:href|src)="([^"#]+?)"/g)]
+      .map((m) => m[1])
+      .filter((u) => !/^https?:|^\/|^mailto:|^data:/.test(u));
+    const missing = assets.filter((u) => !existsSync(join('frontend', u)));
+    check(`every local asset referenced by ${page} ships`, missing.length === 0, missing.join(','));
+  }
 
-  const themeScriptInline = /reascan:theme/.test(how.split('<link')[0] ?? '');
-  check('theme bootstrap is inline in the head (anti-flash, same as index)', themeScriptInline);
-  check('how.html ships the theme + background modules', /src="theme\.js"/.test(how) && /src="bg2d\.js"/.test(how));
-  check('app.js (and its analyzer ids) is not loaded on the how page', !/src="app\.js"/.test(how));
+  const bootstrapPrecedesStyles = ['index.html', 'app.html'].every((page) => {
+    const p = readFileSync(join('frontend', page), 'utf8');
+    const boot = p.indexOf('reascan:theme');
+    const css = p.indexOf('rel="stylesheet"');
+    return boot !== -1 && css !== -1 && boot < css;
+  });
+  check('theme bootstrap is inline in the head before any stylesheet (anti-flash, both pages)', bootstrapPrecedesStyles);
+  check('both pages ship the theme + background modules',
+    /src="theme\.js"/.test(html) && /src="bg2d\.js"/.test(html)
+    && /src="theme\.js"/.test(app) && /src="bg2d\.js"/.test(app));
 
-  const howCss = readFileSync('frontend/style.css', 'utf8');
-  check('the how-page layout tokens are wired in style.css', /\.chain-node/.test(howCss) && /\.stage-grid/.test(howCss) && /\.footer-note/.test(howCss));
-  check('no hardcoded color in how.html', !/#[0-9a-fA-F]{3,8}\b/.test(how));
+  const pageCss = readFileSync('frontend/style.css', 'utf8');
+  check('the how-page layout tokens are wired in style.css', /\.chain-node/.test(pageCss) && /\.stage-grid/.test(pageCss) && /\.footer-note/.test(pageCss));
+  check('no hardcoded color in the shipped pages', !/#[0-9a-fA-F]{3,8}\b/.test(html) && !/#[0-9a-fA-F]{3,8}\b/.test(app));
   const footerNamed = (doc) => {
     const m = /<footer[\s\S]*?<\/footer>/.exec(doc);
     return Boolean(m && m[0].includes('brand-mark') && m[0].includes('reascan'));
   };
-  check('both footers carry the site name', footerNamed(html) && footerNamed(how));
-  check('the tunnel vendor is not typoed (Consoleflare regression)', !/Consoleflare/.test(how));
-  check('no em-dash anywhere in the shipped pages', !/[\u2013\u2014]/.test(how + html));
+  check('both footers carry the site name', footerNamed(html) && footerNamed(app));
+  check('the tunnel vendor is not typoed (Consoleflare regression)', !/Consoleflare/.test(html + app));
+  check('no em-dash anywhere in the shipped pages', !/[\u2013\u2014]/.test(html + app));
 }
 
 // ================================================================ STEP 7

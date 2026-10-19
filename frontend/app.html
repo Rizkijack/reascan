@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>reascan: web stack &amp; JS bundle analysis</title>
+  <meta name="description" content="Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle inventory, browser capture, and deep static analysis, with explicit limitations and unknowns." />
+  <link rel="icon" href="data:," />
+  <script>
+    // Anti-flash theme bootstrap: runs before any stylesheet paints. Reads the
+    // stored mode (default dark), resolves "system" against the OS preference,
+    // and must never crash - storage can be denied in private windows.
+    (() => {
+      let mode = 'dark';
+      try {
+        const stored = localStorage.getItem('reascan:theme');
+        if (stored === 'light' || stored === 'dark' || stored === 'system') mode = stored;
+      } catch { /* private mode: fall back to the default below */ }
+      let theme = mode;
+      if (mode === 'system' && typeof window.matchMedia === 'function') {
+        theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="bg2d" aria-hidden="true"></canvas>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">◈</span>
+        reascan
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="index.html#how" class="nav-link">How it works</a>
+        <a href="app.html" class="nav-link is-active" aria-current="page">Open app</a>
+        <a href="https://github.com/Rizkijack/reascan" class="nav-link" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+      <div class="theme-toggle" id="theme-toggle" role="group" aria-label="Color theme">
+        <button type="button" data-mode="light" aria-pressed="false">Light</button>
+        <button type="button" data-mode="dark" aria-pressed="true">Dark</button>
+        <button type="button" data-mode="system" aria-pressed="false">System</button>
+      </div>
+      <span class="tagline">evidence, not scores</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero how-hero" aria-labelledby="app-heading">
+      <div class="container hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow rise">The analyzer</p>
+          <h1 id="app-heading" class="rise">Run an analysis.</h1>
+          <p class="lede rise">
+            Paste a target URL, pick the categories, and the report renders on
+            this page: verdict, evidence rows, explicit limitations and unknowns.
+            A run takes up to about 70 seconds.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <div class="container">
+      <section class="panel card reveal" id="analyze" aria-labelledby="form-heading">
+        <h2 id="form-heading">Analyze a URL</h2>
+        <form id="analyze-form" novalidate>
+          <label for="target-url" class="form-label">Target URL</label>
+          <div class="form-row">
+            <input
+              id="target-url"
+              name="url"
+              type="url"
+              inputmode="url"
+              placeholder="https://example.com"
+              autocomplete="off"
+              spellcheck="false"
+              required
+            />
+            <button type="submit" id="analyze-btn" class="btn btn-primary">Analyze</button>
+          </div>
+
+          <fieldset class="categories">
+            <legend>Categories</legend>
+            <label class="check"><input type="checkbox" name="category" value="fingerprint" checked /> <span>Fingerprint</span></label>
+            <label class="check"><input type="checkbox" name="category" value="jsBundle" checked /> <span>JS Bundles</span></label>
+            <label class="check"><input type="checkbox" name="category" value="browserCapture" /> <span>Browser capture <span class="tag">REA</span></span></label>
+            <label class="check"><input type="checkbox" name="category" value="jsDeep" /> <span>JS deep analysis <span class="tag">REA</span></span></label>
+          </fieldset>
+        </form>
+        <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+      </section>
+
+      <section id="history-section" class="panel card reveal" aria-labelledby="history-heading" hidden>
+        <h2 id="history-heading">History <button type="button" id="clear-history" class="link-btn">clear</button></h2>
+        <div id="history-list" class="history"></div>
+      </section>
+
+      <section id="results" class="panel card reveal" aria-labelledby="results-heading" hidden>
+        <h2 id="results-heading">Findings</h2>
+        <div id="verdict" class="verdict"></div>
+        <div id="charts" class="charts" hidden></div>
+        <div id="findings-body"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">◈</span>
+        reascan
+      </a>
+      <p class="footer-links">
+        <a href="index.html#how">How it works</a>
+        <a href="https://github.com/Rizkijack/reascan" target="_blank" rel="noopener">GitHub</a>
+      </p>
+      <p class="footer-note">
+        Every fetch is guarded against private-network addresses at two layers.
+        Secret-pattern detection is intentionally not performed. This report
+        never displays secret values.
+      </p>
+    </div>
+  </footer>
+
+  <script type="module" src="theme.js"></script>
+  <script type="module" src="bg2d.js"></script>
+  <script type="module" src="app.js"></script>
+  <script>
+    // Gentle fade/slide-in on scroll. Respects prefers-reduced-motion.
+    (() => {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) { e.target.classList.add('is-visible'); io.unobserve(e.target); }
+        }
+      }, { threshold: 0.08 });
+      document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+    })();
+  </script>
+</body>
+</html>

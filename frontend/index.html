@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>reascan: web stack &amp; JS bundle analysis</title>
-  <meta name="description" content="Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle inventory, confidence with explicit limitations and unknowns." />
+  <title>reascan: evidence, not scores</title>
+  <meta name="description" content="How reascan works: paste a URL and an evidence-standard report comes back through an edge guard, an outbound tunnel and the analysis engine on the VM. Limitations and unknowns are part of the report." />
   <link rel="icon" href="data:," />
   <script>
     // Anti-flash theme bootstrap: runs before any stylesheet paints. Reads the
@@ -41,8 +41,8 @@
         reascan
       </a>
       <nav class="site-nav" aria-label="Primary">
-        <a href="#analyze" class="nav-link is-active">Analyze</a>
-        <a href="how.html" class="nav-link">How it works</a>
+        <a href="#how" class="nav-link is-active" aria-current="page">How it works</a>
+        <a href="app.html" class="nav-link">Open app</a>
         <a href="https://github.com/Rizkijack/reascan" class="nav-link" target="_blank" rel="noopener">GitHub</a>
       </nav>
       <div class="theme-toggle" id="theme-toggle" role="group" aria-label="Color theme">
@@ -61,12 +61,12 @@
           <p class="eyebrow rise">Web stack &amp; JS bundle analysis</p>
           <h1 id="hero-heading" class="rise">Evidence, not scores.</h1>
           <p class="lede rise">
-            Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle
-            inventory, browser capture, and deep static analysis, with explicit
-            limitations and unknowns.
+            Paste a URL in the analyzer and get an evidence-standard report:
+            HTTP fingerprint, JS bundle inventory, browser capture, and deep
+            static analysis, with explicit limitations and unknowns.
           </p>
           <div class="hero-ctas rise">
-            <a href="#analyze" class="btn btn-primary">Analyze a URL</a>
+            <a href="app.html#analyze" class="btn btn-primary">Open app</a>
             <a href="https://github.com/Rizkijack/reascan" class="btn btn-secondary" target="_blank" rel="noopener">Star on GitHub</a>
           </div>
           <ul class="hero-points rise" aria-label="Analysis categories">
@@ -78,8 +78,8 @@
         </div>
 
         <!-- Specimen report: static sample data showing what a finding row looks
-             like. Decorative preview of the real report below, so screen readers
-             are told to skip it. -->
+             like. Decorative preview of the real report in the app, so screen
+             readers are told to skip it. -->
         <div class="specimen hero-specimen rise" aria-hidden="true">
           <div class="specimen-bar">
             <span class="pulse"></span>
@@ -125,45 +125,140 @@
     </section>
 
     <div class="container">
-      <section class="panel card reveal" id="analyze" aria-labelledby="form-heading">
-        <h2 id="form-heading">Analyze a URL</h2>
-        <form id="analyze-form" novalidate>
-          <label for="target-url" class="form-label">Target URL</label>
-          <div class="form-row">
-            <input
-              id="target-url"
-              name="url"
-              type="url"
-              inputmode="url"
-              placeholder="https://example.com"
-              autocomplete="off"
-              spellcheck="false"
-              required
-            />
-            <button type="submit" id="analyze-btn" class="btn btn-primary">Analyze</button>
+      <section id="how" class="panel card reveal" aria-labelledby="chain-heading">
+        <h2 id="chain-heading">Five hops, one report</h2>
+        <div class="chain" role="list" aria-label="Analysis request path">
+          <div class="chain-node" role="listitem">
+            <span class="chain-tag">browser</span>
+            <span class="chain-name">The page</span>
+            <span class="chain-sub">vanilla ESM, no framework</span>
           </div>
-
-          <fieldset class="categories">
-            <legend>Categories</legend>
-            <label class="check"><input type="checkbox" name="category" value="fingerprint" checked /> <span>Fingerprint</span></label>
-            <label class="check"><input type="checkbox" name="category" value="jsBundle" checked /> <span>JS Bundles</span></label>
-            <label class="check"><input type="checkbox" name="category" value="browserCapture" /> <span>Browser capture <span class="tag">REA</span></span></label>
-            <label class="check"><input type="checkbox" name="category" value="jsDeep" /> <span>JS deep analysis <span class="tag">REA</span></span></label>
-          </fieldset>
-        </form>
-        <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+          <div class="chain-node" role="listitem">
+            <span class="chain-tag">edge</span>
+            <span class="chain-name">Pages Function</span>
+            <span class="chain-sub">validate, refuse, proxy</span>
+          </div>
+          <div class="chain-node" role="listitem">
+            <span class="chain-tag">tunnel</span>
+            <span class="chain-name">Cloudflare Tunnel</span>
+            <span class="chain-sub">outbound only, no inbound ports</span>
+          </div>
+          <div class="chain-node" role="listitem">
+            <span class="chain-tag">adapter</span>
+            <span class="chain-name">Server on the VM</span>
+            <span class="chain-sub">auth, deadline, four categories</span>
+          </div>
+          <div class="chain-node" role="listitem">
+            <span class="chain-tag">engine</span>
+            <span class="chain-name">Analysis modules + REA</span>
+            <span class="chain-sub">headers, bundles, capture, deep</span>
+          </div>
+        </div>
       </section>
 
-      <section id="history-section" class="panel card reveal" aria-labelledby="history-heading" hidden>
-        <h2 id="history-heading">History <button type="button" id="clear-history" class="link-btn">clear</button></h2>
-        <div id="history-list" class="history"></div>
+      <section class="panel card reveal" aria-labelledby="stages-heading">
+        <h2 id="stages-heading">What runs where</h2>
+        <div class="stage-grid">
+          <article class="stage">
+            <h3>The page</h3>
+            <p>
+              Static HTML, one stylesheet pair and module scripts, no framework.
+              The app page carries the analyzer form and the report renderer;
+              the form posts <code>url</code> plus a list of <code>category</code>
+              checkboxes to <code>/api/analyze</code>. Everything the page shows
+              comes back in one JSON response, so a run has no hidden state:
+              render, store in localStorage history, done.
+            </p>
+          </article>
+          <article class="stage">
+            <h3>The edge</h3>
+            <p>
+              A Cloudflare Pages Function sits between the page and the adapter.
+              It validates the URL the same way the adapter does (identical
+              denylist, two copies by contract) and answers <code>422</code> for
+              reserved and private-network targets before the request leaves
+              Cloudflare. It forwards, it never analyzes: the Workers CPU cap
+              would not allow it, and compute is not its job.
+            </p>
+          </article>
+          <article class="stage">
+            <h3>The tunnel</h3>
+            <p>
+              The adapter never opens a port to the internet. <code>cloudflared</code>
+              dials out to Cloudflare, and the Pages Function reaches the adapter
+              through that one outbound connection. The tunnel URL is written into
+              the project secret automatically, so a tunnel restart does not
+              silently orphan the live site.
+            </p>
+          </article>
+          <article class="stage">
+            <h3>The adapter</h3>
+            <p>
+              A Node <code>http</code> server on the VM. It compares the
+              <code>x-api-key</code>, starts a <code>70s</code> deadline, and runs
+              the four requested categories concurrently. Every outbound fetch
+              goes through one guard: <code>redirect: manual</code>, at most
+              <code>3</code> hops, re-resolved and re-checked against the denylist
+              at every hop. A category that fails becomes a limitation in the
+              verdict, never a failed request.
+            </p>
+          </article>
+          <article class="stage stage-wide">
+            <h3>The engine</h3>
+            <p>
+              Four categories, two engines. <strong>Fingerprint</strong> reads
+              response headers, framework markers, CDN hints and TLS in its first
+              pass. <strong>JS bundles</strong> inventories the page's scripts
+              (up to <code>40</code> bundles, <code>1MB</code> each, <code>10s</code>
+              per fetch) and reports entrypoints and endpoints.
+              <strong>Browser capture</strong> and <strong>JS deep analysis</strong>
+              are handled by the REA engine: a bounded capture scenario, and a
+              static parse of up to <code>5</code> downloaded bundles
+              (<code>2MB</code> each) through <code>analyze-javascript-application</code>.
+            </p>
+          </article>
+        </div>
       </section>
 
-      <section id="results" class="panel card reveal" aria-labelledby="results-heading" hidden>
-        <h2 id="results-heading">Findings</h2>
-        <div id="verdict" class="verdict"></div>
-        <div id="charts" class="charts" hidden></div>
-        <div id="findings-body"></div>
+      <section class="panel card reveal" aria-labelledby="report-heading">
+        <h2 id="report-heading">What you get back</h2>
+        <p class="how-lede">
+          One JSON document per run. Every finding carries its own evidence, and
+          the verdict carries what the engine could not see. The app renders
+          exactly that shape, nothing narrated around it.
+        </p>
+        <pre class="schema-pre" aria-label="Response schema"><code>{
+  "status": "ok",
+  "findings": {
+    "url": "https://example.com/",
+    "timestamp": "2026-10-19T05:14:09.581Z",
+    "fingerprint": { "findings": [ ... ], "cdn": "Cloudflare", "tls": null },
+    "js_bundles": [ ... ],
+    "browser_capture": null,
+    "js_deep": { "files_analysed": 1, "findings": 0, "confidence": "derived", ... },
+    "verdict": {
+      "confidence": "high",
+      "limitations": [ "..." ],
+      "unknowns": [ "..." ]
+    }
+  },
+  "duration_ms": 66276
+}</code></pre>
+        <ul class="how-points" aria-label="Finding vocabulary">
+          <li><code>type</code> is <code>observation</code>, <code>derivation</code> or the rare <code>inference</code>: never a score.</li>
+          <li><code>confidence</code> is how good the evidence is, not how safe the site is. reascan refuses to grade websites.</li>
+          <li>A failed category lands in <code>limitations</code>; an unobservable answer lands in <code>unknowns</code>. Nothing is dropped silently.</li>
+          <li>Secret-pattern detection is intentionally absent: the report can never display a secret value.</li>
+        </ul>
+      </section>
+
+      <section class="panel card reveal" aria-labelledby="cta-heading">
+        <h2 id="cta-heading">Run it on a real target</h2>
+        <p class="how-lede">
+          The analyzer is one click away: paste a URL, pick the categories, and
+          read the report with its limitations and unknowns on the same page.
+        </p>
+        <a href="app.html#analyze" class="btn btn-primary">Open app</a>
       </section>
     </div>
   </main>
@@ -175,7 +270,7 @@
         reascan
       </a>
       <p class="footer-links">
-        <a href="how.html">How it works</a>
+        <a href="app.html">Open app</a>
         <a href="https://github.com/Rizkijack/reascan" target="_blank" rel="noopener">GitHub</a>
       </p>
       <p class="footer-note">
@@ -188,7 +283,6 @@
 
   <script type="module" src="theme.js"></script>
   <script type="module" src="bg2d.js"></script>
-  <script type="module" src="app.js"></script>
   <script>
     // Gentle fade/slide-in on scroll. Respects prefers-reduced-motion.
     (() => {

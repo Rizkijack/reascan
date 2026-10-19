@@ -572,7 +572,7 @@ input[type="url"]:focus {
 }
 .footer-links a:hover { color: var(--accent-link); }
 
-/* ---------- how.html (multi-page: the same language, no analyzer ids) ---------- */
+/* ---------- how it works (index.html) + analyzer (app.html): one language ---------- */
 
 .how-hero { padding: var(--space-8) 0 var(--space-4); }
 

@@ -20,8 +20,8 @@ Website 1 halaman: user paste URL → Pages Function validasi (SSRF guard) → f
    paste URL
       │
       ▼
-[Cloudflare Pages — static 1 halaman]
-   index.html + style.css + app.js (vanilla, no build)
+[Cloudflare Pages — 2 halaman statis]
+   index.html + app.html + style.css + app.js (vanilla, no build)
       │ fetch /api/analyze
       ▼
 [Pages Functions — API + SSRF guard L1]
@@ -51,7 +51,7 @@ findings JSON → Pages Function balas apa adanya → render di halaman
 
 ### 3.1 Frontend — static single page (Cloudflare Pages)
 
-**File:** `index.html`, `style.css`, `app.js` — nol build, nol dependency, deploy = copy ke Pages.
+**File:** `index.html` (halaman utama: hero + how it works + CTA Open app), `app.html` (analyzer: form + results panel), `style.css`, `app.js` — nol build, nol dependency, deploy = copy ke Pages.
 
 **Elemen halaman:**
 1. **Header** — brand "reascan", tema Vercel (background hitam #000, teks putih, border tipis #333, tipografi Geist-style/system sans, aksen minimal)
@@ -391,7 +391,8 @@ reascan/                       # repo root (publik, MIT)
 │   # fase 2 tambah: api/status.js, api/result.js
 │
 ├── frontend/                  # Cloudflare Pages project (SATU deploy unit — no-conflict)
-│   ├── index.html             # 1 halaman: form + results panel          ✅
+│   ├── index.html             # halaman utama: how it works + CTA Open app ✅
+│   ├── app.html               # analyzer: form + results panel             ✅
 │   ├── style.css              # tema Vercel dark (~100 baris)             ✅
 │   ├── app.js                 # fetch + render + states + localStorage   ✅
 │   ├── package.json           # type: module (ESM untuk node --test)     ✅

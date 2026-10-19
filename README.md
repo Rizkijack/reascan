@@ -62,7 +62,8 @@ reascan/
 │       ├── health.js        #   it root-relative (GET /api/health)
 │       └── [[catchall]].js  # 404 JSON for unknown /api/* paths
 ├── frontend/                # Cloudflare Pages project (the deploy directory)
-│   ├── index.html           # the page: form + results panel
+│   ├── index.html           # main page: hero + how it works + Open app CTA
+│   ├── app.html             # the analyzer: form + results panel
 │   ├── style.css            # Vercel-dark theme, vanilla
 │   ├── app.js               # fetch + render + localStorage history
 │   ├── package.json         # type: module (ESM for node --test)
