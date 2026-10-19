@@ -83,7 +83,7 @@
           </div>
           <div class="chain-node" role="listitem">
             <span class="chain-tag">tunnel</span>
-            <span class="chain-name">Consoleflare Tunnel</span>
+            <span class="chain-name">Cloudflare Tunnel</span>
             <span class="chain-sub">outbound only, no inbound ports</span>
           </div>
           <div class="chain-node" role="listitem">
@@ -198,14 +198,18 @@
 
   <footer class="site-footer">
     <div class="container footer-inner">
-      <p>
-        Every fetch to your target is guarded against private-network addresses at
-        two layers. Secret-pattern detection is intentionally not performed, so
-        this report never displays secret values.
-      </p>
+      <a class="brand" href="index.html">
+        <span class="brand-mark" aria-hidden="true">◈</span>
+        reascan
+      </a>
       <p class="footer-links">
-        <a href="how.html">How it works</a>
+        <a href="index.html#analyze">Open the analyzer</a>
         <a href="https://github.com/Rizkijack/reascan" target="_blank" rel="noopener">GitHub</a>
+      </p>
+      <p class="footer-note">
+        Every fetch is guarded against private-network addresses at two layers.
+        Secret-pattern detection is intentionally not performed. This report
+        never displays secret values.
       </p>
     </div>
   </footer>

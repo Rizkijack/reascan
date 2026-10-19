@@ -42,7 +42,6 @@
       </a>
       <nav class="site-nav" aria-label="Primary">
         <a href="#analyze" class="nav-link is-active">Analyze</a>
-        <a href="#results" class="nav-link">Findings</a>
         <a href="how.html" class="nav-link">How it works</a>
         <a href="https://github.com/Rizkijack/reascan" class="nav-link" target="_blank" rel="noopener">GitHub</a>
       </nav>
@@ -171,12 +170,18 @@
 
   <footer class="site-footer">
     <div class="container footer-inner">
-      <p>
-        Every fetch to your target is guarded against private-network addresses at two layers.
-        Secret-pattern detection is intentionally not performed. This report never displays secret values.
-      </p>
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">◈</span>
+        reascan
+      </a>
       <p class="footer-links">
+        <a href="how.html">How it works</a>
         <a href="https://github.com/Rizkijack/reascan" target="_blank" rel="noopener">GitHub</a>
+      </p>
+      <p class="footer-note">
+        Every fetch is guarded against private-network addresses at two layers.
+        Secret-pattern detection is intentionally not performed. This report
+        never displays secret values.
       </p>
     </div>
   </footer>

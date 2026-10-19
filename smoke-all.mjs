@@ -804,7 +804,10 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   const how = readFileSync('frontend/how.html', 'utf8');
   check('how.html exists and links back to the analyzer', /href="index\.html#analyze"/.test(how) && /href="index\.html"/.test(how));
   check('index.html links to the how page', /href="how\.html"/.test(html));
-  check('the "Findings" nav entry is preserved', /href="#results"/.test(html));
+  // Findings is part of the analyze page by design: the section keeps its id
+  // (app.js targets it), the nav no longer carries a separate anchor link.
+  check('findings section stays on the analyze page (id app.js targets)', /id="results"/.test(html));
+  check('no separate Findings nav entry left behind (merged into Analyze)', !/href="#results"/.test(html));
 
   const assets = [...how.matchAll(/(?:href|src)="([^"#]+?)"/g)]
     .map((m) => m[1])
@@ -818,8 +821,14 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   check('app.js (and its analyzer ids) is not loaded on the how page', !/src="app\.js"/.test(how));
 
   const howCss = readFileSync('frontend/style.css', 'utf8');
-  check('the how-page layout tokens are wired in style.css', /\.chain-node/.test(howCss) && /\.stage-grid/.test(howCss));
+  check('the how-page layout tokens are wired in style.css', /\.chain-node/.test(howCss) && /\.stage-grid/.test(howCss) && /\.footer-note/.test(howCss));
   check('no hardcoded color in how.html', !/#[0-9a-fA-F]{3,8}\b/.test(how));
+  const footerNamed = (doc) => {
+    const m = /<footer[\s\S]*?<\/footer>/.exec(doc);
+    return Boolean(m && m[0].includes('brand-mark') && m[0].includes('reascan'));
+  };
+  check('both footers carry the site name', footerNamed(html) && footerNamed(how));
+  check('the tunnel vendor is not typoed (Consoleflare regression)', !/Consoleflare/.test(how));
   check('no em-dash anywhere in the shipped pages', !/[\u2013\u2014]/.test(how + html));
 }
 
