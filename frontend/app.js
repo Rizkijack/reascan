@@ -1,19 +1,22 @@
-// reascan frontend — vanilla JS, zero framework.
+// reascan frontend - vanilla JS, zero framework.
 //
 // State machine: one `state` object + render(). The API is sync (seconds), so
-// there is no polling and no job state — phase 2 async adds an interval here,
+// there is no polling and no job state - phase 2 async adds an interval here,
 // not a rewrite.
 //
 // Every string rendered from a findings object is TARGET-CONTROLLED (headers,
-// marker values, endpoint paths — all attacker-influenced on a hostile site).
+// marker values, endpoint paths - all attacker-influenced on a hostile site).
 // That is why this file builds DOM with createElement/textContent only: one
 // innerHTML with a finding value would turn the report into an XSS sink.
 
 const HISTORY_KEY = 'reascan:history';
 const HISTORY_MAX = 50;
 
+// SVG charts (donut + sparkline), fed only from the real report payload.
+import { buildDonut, buildSparkline } from './charts.js';
+
 // Client-side deadline for one analysis. The edge gives up on the engine at
-// 75s and answers 502, so a healthy chain always replies well before this —
+// 75s and answers 502, so a healthy chain always replies well before this -
 // the timer only catches a hung edge or proxy, which would otherwise leave
 // the spinner up until the browser's own multi-minute fetch timeout.
 const ANALYZE_TIMEOUT_MS = 80000;
@@ -30,7 +33,7 @@ function loadHistory() {
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
-    // A corrupt entry must not break the page — the history is a convenience,
+    // A corrupt entry must not break the page - the history is a convenience,
     // not the report.
     return [];
   }
@@ -63,7 +66,7 @@ function saveToHistory(findings) {
     try {
       localStorage.setItem(HISTORY_KEY, JSON.stringify(candidate));
       if (candidate.length < history.length) {
-        historyNotice = `kept the newest ${candidate.length} analyses — the rest no longer fit in this browser's storage`;
+        historyNotice = `kept the newest ${candidate.length} analyses - the rest no longer fit in this browser's storage`;
       }
       break;
     } catch {
@@ -127,7 +130,7 @@ function renderHistory() {
     confCell.append(el('span', `chip conf-${conf}`, conf));
 
     const whenCell = document.createElement('td');
-    const when = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '—';
+    const when = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '-';
     whenCell.append(el('span', 'when', when));
 
     row.append(target, confCell, whenCell);
@@ -190,20 +193,32 @@ function renderFingerprint(fp) {
   wrap.append(el('h3', null, 'Fingerprint'));
 
   if (fp.findings?.length) {
+    const findings = fp.findings;
+
+    // Toolbar: search box + "visible / total" summary. Filtering toggles a class
+    // on the stored <tr>s; the data model stays the findings array untouched.
+    const tools = el('div', 'table-tools');
+    const search = el('input', 'fp-search');
+    search.type = 'search';
+    search.placeholder = 'filter findings';
+    // placeholder is not a label (and the boot markup never wraps this input);
+    // screen readers need an explicit accessible name.
+    search.setAttribute?.('aria-label', 'Filter findings');
+    search.autocomplete = 'off';
+    const count = el('span', 'table-count', `${findings.length} / ${findings.length}`);
+    tools.append(search, count);
+
     const holder = el('div', 'table-wrap');
-    const table = document.createElement('table');
-    table.className = 'report-table';
+    const table = el('table', 'report-table');
 
     const thead = document.createElement('thead');
-    const head = document.createElement('tr');
-    for (const label of ['Key', 'Value', 'Type', 'Evidence', 'Confidence']) {
-      head.append(el('th', null, label));
-    }
-    thead.append(head);
-    table.append(thead);
-
+    const headRow = document.createElement('tr');
     const tbody = document.createElement('tbody');
-    for (const f of fp.findings) {
+    table.append(thead, tbody);
+
+    // rows: [finding, <tr>] - the sortable/searchable view over the same array
+    const rows = [];
+    for (const f of findings) {
       // Type and confidence render as chips so the evidence vocabulary reads at
       // a glance; the text content is unchanged, only the styling hook differs.
       const row = document.createElement('tr');
@@ -214,11 +229,71 @@ function renderFingerprint(fp) {
         el('td', 'evidence', String(f.evidence)),
         el('td', 'conf', el('span', `chip conf-${f.confidence}`, String(f.confidence))),
       );
+      rows.push([f, row]);
       tbody.append(row);
     }
-    table.append(tbody);
+
+    // Sorting: a header beat toggles asc/desc; the sort ranks the categorical
+    // columns so text order never masquerades as ranking (e.g. "low" > "high"
+    // lexically). Re-appending the stored rows keeps the DOM diff-free.
+    const RANKS = {
+      confidence: { high: 0, medium: 1, low: 2, observed: 3, derived: 3 },
+      type: { observation: 0, derivation: 1, inference: 2 },
+    };
+    let sortCol = null;
+    let sortDir = 1;
+    const COLUMN_LABELS = [['Key', 'key'], ['Value', 'value'], ['Type', 'type'], ['Evidence', 'evidence'], ['Confidence', 'confidence']];
+    const glyphs = [];
+    for (const [label, col] of COLUMN_LABELS) {
+      const th = el('th', null, label);
+      // Marks the column clickable; the affordance rules in style.css key on it.
+      // Optional-chained so a DOM-less shim (smoke) can still render the table.
+      th.setAttribute?.('data-sortable', 'true');
+      // Keyboard parity: sort is click-only otherwise.
+      th.setAttribute?.('tabindex', '0');
+      const sortOnce = () => th.click?.();
+      th.addEventListener?.('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault?.(); sortOnce(); }
+      });
+      const glyph = el('span', 'sort-glyph', '');
+      // aria-sort on the <th> is the announcement; the glyph is decoration.
+      glyph.setAttribute?.('aria-hidden', 'true');
+      th.append(glyph);
+      glyphs.push([col, glyph]);
+      th.addEventListener('click', () => {
+        if (sortCol === col) sortDir = -sortDir;
+        else { sortCol = col; sortDir = 1; }
+        rows.sort(([fa], [fb]) => {
+          let cmp;
+          if (RANKS[col]) cmp = (RANKS[col][fa[col]] ?? 9) - (RANKS[col][fb[col]] ?? 9);
+          else cmp = String(fa[col]).localeCompare(String(fb[col]), undefined, { numeric: true, sensitivity: 'base' });
+          return cmp * sortDir;
+        });
+        for (const [, tr] of rows) tbody.append(tr);
+        for (const [c, g] of glyphs) g.textContent = c === sortCol ? (sortDir === 1 ? '▲' : '▼') : '';
+        // Screen readers get the same signal; clear stale marks on other columns.
+        for (const otherTh of headRow.children) otherTh.removeAttribute?.('aria-sort');
+        th.setAttribute?.('aria-sort', sortDir === 1 ? 'ascending' : 'descending');
+      });
+      headRow.append(th);
+    }
+    thead.append(headRow);
+
+    search.addEventListener('input', () => {
+      const q = String(search.value ?? '').trim().toLowerCase();
+      let visible = 0;
+      for (const [f, tr] of rows) {
+        const haystack = `${f.key} ${Array.isArray(f.value) ? f.value.join(', ') : f.value} ${f.evidence} ${f.type} ${f.confidence}`.toLowerCase();
+        const show = !q || haystack.includes(q);
+        // optional-chained so a DOM-less shim can still render the full table
+        tr.classList?.toggle?.('is-hidden', !show);
+        if (show) visible++;
+      }
+      count.textContent = `${visible} / ${rows.length}`;
+    });
+
     holder.append(table);
-    wrap.append(holder);
+    wrap.append(tools, holder);
   }
 
   if (fp.tls) {
@@ -255,7 +330,7 @@ function renderBundles(bundles) {
     ].filter(Boolean);
     card.append(el('div', 'meta', flags.join(' · ')));
 
-    // The backend reports WHICH signals fired, not just a boolean — the signals
+    // The backend reports WHICH signals fired, not just a boolean - the signals
     // are the evidence behind the "obfuscated" derivation (evidence standard:
     // a claim without its evidence is not a finding).
     if (b.obfuscated && b.obfuscation_signals?.length) {
@@ -311,7 +386,7 @@ function renderBrowserCapture(cap) {
 
   // Resource-type breakdown the capture distils (script N · stylesheet N …).
   // Same reason as the event summary: what the page spent its requests on is
-  // evidence the backend already collected — dropping it here loses it.
+  // evidence the backend already collected - dropping it here loses it.
   const rt = cap.resource_types;
   if (rt && typeof rt === 'object') {
     const parts = Object.entries(rt)
@@ -325,7 +400,7 @@ function renderBrowserCapture(cap) {
     wrap.append(el('h4', null, `Failed requests (${cap.failed_requests.length})`));
     const ul = document.createElement('ul');
     for (const f of cap.failed_requests) {
-      ul.append(el('li', null, `${f.failure ?? 'failed'} — ${f.url}`));
+      ul.append(el('li', null, `${f.failure ?? 'failed'} - ${f.url}`));
     }
     wrap.append(ul);
   }
@@ -382,6 +457,83 @@ function renderFindings(findings) {
   body.append(renderJsDeep(findings.js_deep));
 }
 
+// Strip of real numbers (payload counts) + donut (confidence distribution) +
+// sparkline (fingerprint finding count across the stored history, oldest to
+// newest). Charts stay off the page when SVG is unavailable or the data is too
+// thin to chart honestly - an empty donut is a claim, not decoration. A chart
+// that fails to build is decoration failing, NEVER the report failing: the whole
+// body runs inside a recovery guard so findings always reach the screen.
+function renderCharts() {
+  const holder = $('charts');
+  if (!holder) return;
+  holder.textContent = '';
+
+  try {
+    const findings = state.findings;
+    const canSvg = typeof document.createElementNS === 'function';
+    if (!findings || !canSvg) {
+      holder.hidden = true;
+      return;
+    }
+
+    const fpFindings = findings.fingerprint?.findings ?? [];
+    const bundles = findings.js_bundles ?? [];
+    const limitations = findings.verdict?.limitations ?? [];
+    const unknowns = findings.verdict?.unknowns ?? [];
+
+    // Confidence distribution straight from the typed fingerprint findings.
+    const confCount = { high: 0, medium: 0, low: 0 };
+    for (const f of fpFindings) {
+      if (f?.confidence in confCount) confCount[f.confidence]++;
+    }
+
+    // History series: how many fingerprint findings each stored analysis carried.
+    const series = loadHistory()
+      .slice()
+      .reverse()
+      .map((entry) => entry?.findings?.fingerprint?.findings?.length)
+      .filter((n) => typeof n === 'number');
+
+    const stat = (label, value) => {
+      const s = el('div', 'stat');
+      s.append(el('div', 'stat-label', label), el('div', 'stat-value', String(value)));
+      return s;
+    };
+
+    const grid = el('div', 'stat-grid');
+    const spark = series.length >= 2 ? buildSparkline(series, { width: 120, height: 28 }) : null;
+    const firstStat = stat('fingerprint findings', fpFindings.length);
+    if (spark) firstStat.append(document.createElement('br'), spark);
+    grid.append(
+      firstStat,
+      stat('js bundles', bundles.length),
+      stat('limitations', limitations.length),
+      stat('unknowns', unknowns.length),
+    );
+    holder.append(grid);
+
+    const donut = buildDonut(Object.entries(confCount), { size: 84 });
+    if (donut) {
+      const C_CLASS = { high: 'ok', medium: 'warn', low: 'danger' };
+      const legend = el('div', 'donut-legend');
+      for (const [key, n] of Object.entries(confCount).filter(([, n]) => n > 0)) {
+        const cls = C_CLASS[key];
+        const line = el('span', cls ? `c-${cls}` : null);
+        line.append(el('span', cls ? `swatch w-${cls}` : null), document.createTextNode(` ${key} ${n}`));
+        legend.append(line);
+      }
+      const box = el('div', 'donut-box');
+      box.append(donut, legend);
+      holder.append(box);
+    }
+
+    holder.hidden = false;
+  } catch {
+    holder.textContent = '';
+    holder.hidden = true;
+  }
+}
+
 function render() {
   const status = $('status');
   const results = $('results');
@@ -403,6 +555,7 @@ function render() {
     status.className = 'status';
     results.hidden = false;
     renderFindings(state.findings);
+    renderCharts();
   }
 }
 
@@ -475,7 +628,7 @@ async function handleSubmit(e) {
   } catch (err) {
     state.phase = 'error';
     state.error = err?.name === 'AbortError'
-      ? `the analyzer did not answer within ${Math.round(ANALYZE_TIMEOUT_MS / 1000)}s — try again`
+      ? `the analyzer did not answer within ${Math.round(ANALYZE_TIMEOUT_MS / 1000)}s - try again`
       : `could not reach the analyzer: ${err.message}`;
   } finally {
     clearTimeout(timer);
@@ -492,7 +645,7 @@ $('clear-history').addEventListener('click', () => {
   try {
     localStorage.removeItem(HISTORY_KEY);
   } catch {
-    // storage disabled — list simply re-renders from the same empty source
+    // storage disabled - list simply re-renders from the same empty source
   }
   historyNotice = '';
   renderHistory();

@@ -1,20 +1,39 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>reascan — web stack &amp; JS bundle analysis</title>
+  <title>reascan: web stack &amp; JS bundle analysis</title>
   <meta name="description" content="Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle inventory, confidence with explicit limitations and unknowns." />
+  <link rel="icon" href="data:," />
+  <script>
+    // Anti-flash theme bootstrap: runs before any stylesheet paints. Reads the
+    // stored mode (default dark), resolves "system" against the OS preference,
+    // and must never crash - storage can be denied in private windows.
+    (() => {
+      let mode = 'dark';
+      try {
+        const stored = localStorage.getItem('reascan:theme');
+        if (stored === 'light' || stored === 'dark' || stored === 'system') mode = stored;
+      } catch { /* private mode: fall back to the default below */ }
+      let theme = mode;
+      if (mode === 'system' && typeof window.matchMedia === 'function') {
+        theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap"
     rel="stylesheet"
   />
   <link rel="stylesheet" href="tokens.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <canvas id="bg3d" aria-hidden="true"></canvas>
   <header class="site-header">
     <div class="container header-inner">
       <a class="brand" href="/">
@@ -26,6 +45,11 @@
         <a href="#results" class="nav-link">Findings</a>
         <a href="https://github.com/Rizkijack/reascan" class="nav-link" target="_blank" rel="noopener">GitHub</a>
       </nav>
+      <div class="theme-toggle" id="theme-toggle" role="group" aria-label="Color theme">
+        <button type="button" data-mode="light" aria-pressed="false">Light</button>
+        <button type="button" data-mode="dark" aria-pressed="true">Dark</button>
+        <button type="button" data-mode="system" aria-pressed="false">System</button>
+      </div>
       <span class="tagline">evidence, not scores</span>
     </div>
   </header>
@@ -38,7 +62,7 @@
           <h1 id="hero-heading" class="rise">Evidence, not scores.</h1>
           <p class="lede rise">
             Paste a URL. Get an evidence-standard report: HTTP fingerprint, JS bundle
-            inventory, browser capture, and deep static analysis — with explicit
+            inventory, browser capture, and deep static analysis, with explicit
             limitations and unknowns.
           </p>
           <div class="hero-ctas rise">
@@ -138,6 +162,7 @@
       <section id="results" class="panel card reveal" aria-labelledby="results-heading" hidden>
         <h2 id="results-heading">Findings</h2>
         <div id="verdict" class="verdict"></div>
+        <div id="charts" class="charts" hidden></div>
         <div id="findings-body"></div>
       </section>
     </div>
@@ -147,7 +172,7 @@
     <div class="container footer-inner">
       <p>
         Every fetch to your target is guarded against private-network addresses at two layers.
-        Secret-pattern detection is intentionally not performed — this report never displays secret values.
+        Secret-pattern detection is intentionally not performed. This report never displays secret values.
       </p>
       <p class="footer-links">
         <a href="https://github.com/Rizkijack/reascan" target="_blank" rel="noopener">GitHub</a>
@@ -155,6 +180,8 @@
     </div>
   </footer>
 
+  <script type="module" src="theme.js"></script>
+  <script type="module" src="bg3d.js"></script>
   <script type="module" src="app.js"></script>
   <script>
     // Gentle fade/slide-in on scroll. Respects prefers-reduced-motion.

@@ -1,38 +1,97 @@
-/* reascan — design tokens. Single source of truth for color, type, space, radii. */
+/* reascan - design tokens. Single source of truth for color, type, space, radii.
+   All colors live here; style.css never hardcodes a hex. Themes switch on
+   html[data-theme] (dark default), set pre-paint by the inline head script. */
 
-:root {
-  /* ---- color: dark neutral base (off-black, never pure #000/#fff) ---- */
-  --bg-base: #090b0e;
-  --bg-surface: #0f1216;
-  --bg-elevated: #151920;
-  --bg-input: #0b0e12;
+:root,
+:root[data-theme='dark'] {
+  /* Vercel-grade neutrals: black base, #ededed text (never pure white). */
+  --bg: #000000;
+  --surface: #0a0a0a;
+  --elevated: #141414;
+  --bg-input: #0a0a0a;
 
-  --border: rgba(232, 238, 236, 0.08);
-  --border-strong: rgba(232, 238, 236, 0.16);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
 
-  --text-primary: #e8ebe9;
-  --text-secondary: #99a1a5;
-  --text-muted: #68707a;
+  --text-primary: #ededed;
+  --text-secondary: #a1a1a1;
+  --text-muted: #808080; /* >=4.5 on --elevated too (thead th sits there) */
 
-  /* One accent, saturation kept under 80%. No gradient, no glow tokens —
-     depth comes from 1px borders and tinted shadows only. */
-  --accent: #34d399;
-  --accent-ink: #052e20;
-  --accent-soft: rgba(52, 211, 153, 0.1);
-  --accent-line: rgba(52, 211, 153, 0.35);
+  /* One accent. On dark its text-level contrast needs the lifted variant:
+     #0070f3 reads 2.9:1 on near-black, #4a9fff reads 7.3:1. The raw accent
+     still paints borders/dots; text-level links use --accent-link. */
+  --accent: #0070f3;
+  --accent-link: #4a9fff;
+  --accent-soft: rgba(0, 112, 243, 0.15);
+  --accent-line: rgba(74, 159, 255, 0.4);
 
-  /* Semantic status colors (evidence standard vocabulary, not decoration). */
   --ok: #34d399;
+  --ok-line: rgba(52, 211, 153, 0.35);
   --ok-soft: rgba(52, 211, 153, 0.1);
   --warn: #f0b429;
+  --warn-line: rgba(240, 180, 41, 0.35);
   --warn-soft: rgba(240, 180, 41, 0.1);
   --danger: #f26d6d;
+  --danger-line: rgba(242, 109, 109, 0.35);
   --danger-soft: rgba(242, 109, 109, 0.1);
 
-  /* ---- typography ---- */
-  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-body: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* WebGL background palette: barely-there line work so text always wins. */
+  --bg3d-line: rgba(255, 255, 255, 0.06);
+  --bg3d-accent: rgba(74, 159, 255, 0.05);
+
+  /* sticky header over the canvas needs translucency */
+  --header-bg: rgba(0, 0, 0, 0.72);
+
+  --shadow-panel: none;
+
+  --focus-ring: #4a9fff;
+}
+
+:root[data-theme='light'] {
+  --bg: #ffffff;
+  --surface: #fafafa;
+  --elevated: #f5f5f5;
+  --bg-input: #ffffff;
+
+  --border: #eaeaea;
+  --border-strong: #d4d4d4;
+
+  --text-primary: #171717;
+  --text-secondary: #666666;
+  --text-muted: #666666;
+
+  --accent: #0070f3;
+  --accent-link: #0068f3; /* text-level accent: >=4.5 on bg#fff, surface#fafafa, elevated#f5f5f5 */
+  --accent-soft: rgba(0, 112, 243, 0.1);
+  --accent-line: rgba(0, 112, 243, 0.4);
+
+  /* Text-level status colors for light surfaces: each keeps >=4.5:1 on its soft chip. */
+  --ok: #067647;
+  --ok-line: rgba(6, 118, 71, 0.35);
+  --ok-soft: rgba(6, 118, 71, 0.08);
+  --warn: #a15b00; /* >=4.5 on --warn-soft composited over --surface */
+  --warn-line: rgba(161, 92, 0, 0.35);
+  --warn-soft: rgba(161, 92, 0, 0.08);
+  --danger: #c0392b;
+  --danger-line: rgba(192, 57, 43, 0.35);
+  --danger-soft: rgba(192, 57, 43, 0.08);
+
+  --bg3d-line: rgba(0, 0, 0, 0.05);
+  --bg3d-accent: rgba(0, 112, 243, 0.04);
+
+  --header-bg: rgba(255, 255, 255, 0.72);
+
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  --focus-ring: #0070f3;
+}
+
+/* ---- typography + shared structure tokens ---- */
+
+:root {
+  --font-display: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* 1.25 type scale */
   --text-xs: 0.8125rem;   /* 13px */
@@ -60,19 +119,13 @@
   --max-width: 1200px;
   --content-width: 880px;
 
-  /* ---- radii ---- */
-  --radius-card: 14px;
-  --radius-control: 10px;
+  /* ---- radii: control 6, card 10 ---- */
+  --radius-card: 10px;
+  --radius-control: 6px;
   --radius-pill: 999px;
-
-  /* ---- depth (tinted, never a neon outer glow) ---- */
-  --shadow-panel: 0 24px 48px -28px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 
   /* ---- motion ---- */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-fast: 150ms;
   --duration-base: 250ms;
-
-  /* ---- focus ---- */
-  --focus-ring: 0 0 0 3px rgba(52, 211, 153, 0.35);
 }
