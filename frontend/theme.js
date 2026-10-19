@@ -61,7 +61,7 @@ export function applyTheme(mode, { persist = true } = {}) {
   }
   // The WebGL background reads its colors from the live tokens; ask it to re-read.
   try {
-    window.__reascanBG3D__setColors?.();
+    window.__reascanBG2D__setColors?.();
   } catch { /* background module absent or broken: it is decorative */ }
   return theme;
 }

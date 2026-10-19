@@ -35,9 +35,10 @@
   --danger-line: rgba(242, 109, 109, 0.35);
   --danger-soft: rgba(242, 109, 109, 0.1);
 
-  /* WebGL background palette: barely-there line work so text always wins. */
-  --bg3d-line: rgba(255, 255, 255, 0.06);
-  --bg3d-accent: rgba(74, 159, 255, 0.05);
+  /* 2D background palette: barely-there line work plus one soft wash, so text
+     always wins. The wash is alpha-composited, never additive. */
+  --bg2d-line: rgba(255, 255, 255, 0.06);
+  --bg2d-glow: rgba(74, 159, 255, 0.10);
 
   /* sticky header over the canvas needs translucency */
   --header-bg: rgba(0, 0, 0, 0.72);
@@ -76,8 +77,8 @@
   --danger-line: rgba(192, 57, 43, 0.35);
   --danger-soft: rgba(192, 57, 43, 0.08);
 
-  --bg3d-line: rgba(0, 0, 0, 0.05);
-  --bg3d-accent: rgba(0, 112, 243, 0.04);
+  --bg2d-line: rgba(0, 0, 0, 0.05);
+  --bg2d-glow: rgba(0, 104, 243, 0.07);
 
   --header-bg: rgba(255, 255, 255, 0.72);
 
