@@ -15,7 +15,7 @@
 //
 // Run: node smoke-all.mjs
 
-import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -793,6 +793,34 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   check('index.html provides every id app.js looks up', Object.keys(els).every((id) => ids.includes(id)), Object.keys(els).filter((id) => !ids.includes(id)).join(','));
   check('app.js renders with textContent only (no innerHTML sink)', !/\.innerHTML\s*=/.test(readFileSync('frontend/app.js', 'utf8')));
   check('style.css is linked and non-trivial', /style\.css/.test(html) && readFileSync('frontend/style.css', 'utf8').length > 2000);
+
+  // --- how.html: the second page is a contract too ---------------------------
+  // Multi-page means the two pages must stay wired together: nav links resolve
+  // in both directions, every locally referenced asset ships, the theme +
+  // background stack is present (it is what makes the pages feel like one site),
+  // and the copy rules (single accent, no em-dash) hold page-wide.
+  group('how it works page contract');
+
+  const how = readFileSync('frontend/how.html', 'utf8');
+  check('how.html exists and links back to the analyzer', /href="index\.html#analyze"/.test(how) && /href="index\.html"/.test(how));
+  check('index.html links to the how page', /href="how\.html"/.test(html));
+  check('the "Findings" nav entry is preserved', /href="#results"/.test(html));
+
+  const assets = [...how.matchAll(/(?:href|src)="([^"#]+?)"/g)]
+    .map((m) => m[1])
+    .filter((u) => !/^https?:|^\/|^mailto:|^data:/.test(u));
+  const missing = assets.filter((u) => !existsSync(join('frontend', u)));
+  check('every local asset referenced by how.html ships', missing.length === 0, missing.join(','));
+
+  const themeScriptInline = /reascan:theme/.test(how.split('<link')[0] ?? '');
+  check('theme bootstrap is inline in the head (anti-flash, same as index)', themeScriptInline);
+  check('how.html ships the theme + background modules', /src="theme\.js"/.test(how) && /src="bg2d\.js"/.test(how));
+  check('app.js (and its analyzer ids) is not loaded on the how page', !/src="app\.js"/.test(how));
+
+  const howCss = readFileSync('frontend/style.css', 'utf8');
+  check('the how-page layout tokens are wired in style.css', /\.chain-node/.test(howCss) && /\.stage-grid/.test(howCss));
+  check('no hardcoded color in how.html', !/#[0-9a-fA-F]{3,8}\b/.test(how));
+  check('no em-dash anywhere in the shipped pages', !/[\u2013\u2014]/.test(how + html));
 }
 
 // ================================================================ STEP 7
