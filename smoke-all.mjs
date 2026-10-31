@@ -147,10 +147,33 @@ group('safeFetch (live, redirects handled manually)');
   const blocked = await safeFetch('http://169.254.169.254/');
   check('refuses the metadata address before dialling', !blocked.ok, blocked.reason);
 
-  // A live open redirector asking for metadata — the exact hop attack the guard
-  // exists for. It must refuse (or fail), never land on the metadata address.
-  const hop = await safeFetch('https://httpbin.org/redirect-to?url=http://169.254.169.254/latest/meta-data/');
-  check('refuses a redirect into link-local space', !hop.ok, hop.reason ?? 'it followed the hop!');
+  // Staged hop attack (offline): the public open-redirectors used to stage
+  // this (httpbin.org redirect-to) now answer 403 for metadata-shaped targets,
+  // so the staging moved into a fake fetch and the hop contract is pinned
+  // deterministically in lib/urlGuard.test.js. Here a positive live control
+  // proves the hop loop still works against a real network hop.
+  const staged = await (async () => {
+    // A fake fetch that speaks exactly the safeFetch surface: status + location.
+    const stage = () => ({
+      status: 302,
+      headers: { get: (h) => (h.toLowerCase() === 'location' ? 'http://169.254.169.254/latest/meta-data/' : null) },
+    });
+    const real = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = async (url) => { calls.push(String(url)); return stage(); };
+    try {
+      return { result: await safeFetch('https://example.com/attack-stage'), calls };
+    } finally {
+      globalThis.fetch = real;
+    }
+  })();
+  check('refuses a redirect into link-local space (staged)', !staged.result.ok
+    && staged.calls.length === 1
+    && staged.calls.every((c) => !c.includes('169.254')), staged.result.reason ?? 'it followed the hop!');
+
+  // Live positive control: a real hop to a safe target is actually followed.
+  const liveHop = await safeFetch('https://httpbingo.org/redirect-to?url=https%3A//example.com/', { timeoutMs: 15000 });
+  check('follows a redirect to a public host', liveHop.ok && liveHop.finalUrl.startsWith('https://example.com/'), liveHop.reason);
 
   const timeout = await safeFetch('https://example.com/', { timeoutMs: 1 });
   check('aborts at the timeout', !timeout.ok && /timeout/.test(timeout.reason), timeout.reason);

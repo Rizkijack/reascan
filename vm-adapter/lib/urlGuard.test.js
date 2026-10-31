@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DENYLIST_CIDRS, ipInCidr, isDeniedIp, validateUrl } from './urlGuard.js';
+import { DENYLIST_CIDRS, ipInCidr, isDeniedIp, validateUrl, safeFetch } from './urlGuard.js';
 
 test('ipInCidr matches IPv4 ranges', () => {
   assert.equal(ipInCidr('10.1.2.3', '10.0.0.0/8'), true);
@@ -103,4 +103,67 @@ test('validateUrl rejects a host that resolves to loopback', async () => {
   const result = await validateUrl('http://localhost/');
   assert.equal(result.ok, false);
   assert.match(result.reason, /private IP|dns resolution failed/);
+});
+
+// --- redirect hops (offline: the public redirectors stage the attack) --------
+// The public open-redirectors used to stage this live (httpbin.org's
+// redirect-to) now answer 403 for metadata-shaped targets, so the hop contract
+// is pinned here against a fake fetch instead. safeFetch calls the global
+// fetch, so swapping globalThis.fetch before the test runs is the whole seam.
+
+// Response shape grows only what safeFetch reads: status and location header.
+function fakeHopResponse(status, location) {
+  return {
+    status,
+    headers: { get: (h) => (h.toLowerCase() === 'location' ? location : null) },
+  };
+}
+
+async function withFakeFetch(handler, run) {
+  const calls = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return handler(calls.length, String(url));
+  };
+  try {
+    return { result: await run(), calls };
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+
+test('a 302 into link-local space is refused at the hop, never dialled', async () => {
+  const { result, calls } = await withFakeFetch(
+    () => fakeHopResponse(302, 'http://169.254.169.254/latest/meta-data/'),
+    () => safeFetch('https://example.com/attack'),
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /private|denied|blocked/i);
+  // The only outbound call is the redirector; the metadata address is never
+  // asked anything, not even a DNS-level probe.
+  assert.equal(calls.length, 1);
+  assert.ok(calls.every((c) => !c.includes('169.254')), `metadata dialled: ${calls.join(', ')}`);
+  assert.match(calls[0], /example\.com/);
+});
+
+test('a 302 to a public host is followed and the landing URL is the answer', async () => {
+  const { result, calls } = await withFakeFetch(
+    (n) => (n === 1 ? fakeHopResponse(302, 'https://example.com/landing') : fakeHopResponse(200, null)),
+    () => safeFetch('https://example.com/jump'),
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.finalUrl, 'https://example.com/landing');
+  assert.equal(result.response.status, 200);
+  assert.equal(calls.length, 2);
+});
+
+test('redirect loops stop at the cap instead of spinning forever', async () => {
+  const { result, calls } = await withFakeFetch(
+    () => fakeHopResponse(302, 'https://example.com/loop'),
+    () => safeFetch('https://example.com/loop', { timeoutMs: 5000 }),
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /too many redirects/);
+  assert.equal(calls.length, 4); // 1 start + 3 hops cap
 });
