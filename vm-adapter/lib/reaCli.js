@@ -337,6 +337,332 @@ export async function analyzeJsDeep(url, safeFetch, { timeoutMs = 60000, maxBund
   }
 }
 
+// --- passive CDP page inspection --------------------------------------------
+// One URL in, one distilled findings object out. Four `rea` CLI invocations are
+// strung together, all charged against ONE deadline passed in by server.js
+// ("timeoutMs" is the whole category's budget, not this phase's):
+//
+//   1. a fresh page target opened AT the url (reaEnv), then inspect-web-page
+//   2. inspect-web-event-listeners (one selector: button)
+//   3. discover-webmcp-tools
+//   4. export-web-scripts, only when sources were retained
+//
+// The distilled payload carries counts, URLs, and digests — never script
+// source text, DOM nodes, or storage values. Exported sources stay in a temp
+// directory on the VM for local audit and are deleted in `finally`.
+
+export async function inspectWebPage(url, safeFetch, { timeoutMs = 60000, observationMs = 900, exportScripts = true, browserEnv = null } = {}) {
+  // Signature parity with analyzeJsDeep — callers always hand the guarded
+  // fetch. This category never dials through it: the target is fetched by the
+  // REA-managed browser itself, held inside the --allowed-origins policy every
+  // CLI invocation below carries. The parameter stays so the dispatch contract
+  // (callReaTool passes url + safeFetch to every category) does not fork.
+  void safeFetch;
+
+  let origin = null;
+  try {
+    origin = new URL(url).origin;
+  } catch { /* falls through to the guard below */ }
+  if (!origin || origin === 'null') {
+    return { ok: false, reason: 'web.inspectPage requires an absolute http(s) URL' };
+  }
+
+  const deadlineAt = Date.now() + timeoutMs;
+  const remaining = () => Math.max(0, deadlineAt - Date.now());
+
+  // `browserEnv` is the test seam (same principle as the safeFetch DI the
+  // modules carry): tests inject the env answer so the four CLI calls run
+  // against a fake rea binary without a real browser anywhere near the box.
+  // The boot answer deliberately carries NO mapped target: the browser boot is
+  // memoised, so a caller that navigated the boot target ahead of us would
+  // hand us a foreign page — live-verified as a blank inspection with a
+  // confident verdict. This category therefore owns its target: newTargetAt
+  // opens a page at the URL, every sub-call binds to it, and closeTarget runs
+  // in the finally so repeat analyses do not leak pages into the profile.
+  const { ensureBrowserCaptureEnv } = await import('./reaEnv.js');
+  const boot = browserEnv
+    ? await browserEnv()
+    : await ensureBrowserCaptureEnv();
+  if (!boot.ok) return { ok: false, reason: boot.reason };
+  let newTargetAt = null;
+  let closeTarget = null;
+  if (!browserEnv) ({ newTargetAt, closeTarget } = await import('./reaEnv.js'));
+  const fallbackClose = async () => ({ ok: true });
+  const opener = newTargetAt ?? (async () => ({ cdpEndpoint: boot.cdpEndpoint, targetId: boot.targetId }));
+  const closer = closeTarget ?? fallbackClose;
+
+  const target = await opener(url);
+  if (!target?.targetId) return { ok: false, reason: 'browser target could not be opened for inspection' };
+
+  const limitations = [];
+  const add = (l) => { const s = String(l); if (!limitations.includes(s)) limitations.push(s); };
+
+  // Budget guard before the first REA window: a boot that ate the whole budget
+  // must not hand REA a handful of milliseconds — that surfaces as "timed out
+  // after 0ms" for a category that was never really tried.
+  if (remaining() < 1000) {
+    await closer(target.cdpEndpoint, target.targetId);
+    return { ok: false, reason: `inspection skipped: only ${remaining()}ms of budget left after browser boot` };
+  }
+
+  try {
+    const inspect = await runReaJson([
+      'inspect-web-page', target.cdpEndpoint, target.targetId,
+      '--allowed-origins', origin,
+      '--observation-ms', String(observationMs),
+      '--include-script-sources',
+      '--include-storage-keys',
+    ], { timeoutMs: remaining() });
+    if (!inspect.ok) return inspect;
+
+    const inspection = distilInspection(inspect.envelope, origin);
+
+    // Sub-invocations are strictly optional evidence: one refusing must not
+    // discard the category, it must be named in verdict.limitations instead.
+    if (remaining() > 2000) {
+      const listeners = await runReaJson([
+        'inspect-web-event-listeners', target.cdpEndpoint, target.targetId,
+        '--selector', 'button',
+        '--allowed-origins', origin,
+      ], { timeoutMs: remaining() });
+      if (listeners.ok) {
+        inspection.event_listeners = distilEventListeners(listeners.envelope, origin);
+      } else {
+        add(`inspect-web-event-listeners failed: ${listeners.reason}`);
+      }
+    } else {
+      add('event listener probe skipped: not enough budget left');
+    }
+
+    if (remaining() > 2000) {
+      const webmcp = await runReaJson([
+        'discover-webmcp-tools', target.cdpEndpoint, target.targetId,
+        '--allowed-origins', origin,
+      ], { timeoutMs: remaining() });
+      if (webmcp.ok) {
+        inspection.webmcp_tools = distilWebmcpTools(webmcp.envelope);
+      } else {
+        add(`discover-webmcp-tools failed: ${webmcp.reason}`);
+      }
+    } else {
+      add('WebMCP probe skipped: not enough budget left');
+    }
+
+    if (exportScripts && inspection.scripts_total > 0) {
+      const budget = remaining();
+      if (budget > 4000) {
+        const dir = await mkdtemp(join(tmpdir(), 'reascan-webinspect-'));
+        try {
+          // The capture file holds the inspect envelope verbatim (re-serialised);
+          // it contains the retained script sources, so it lives only in this
+          // temp dir and the whole dir leaves in `finally`. The output directory
+          // must not pre-exist — that is the CLI's contract.
+          const captureFile = join(dir, 'page-inspection.json');
+          await writeFile(captureFile, JSON.stringify(inspect.envelope));
+          const exportRun = await runReaJson([
+            'export-web-scripts', captureFile, join(dir, 'scripts'),
+          ], { timeoutMs: remaining() });
+          if (exportRun.ok) {
+            const exported = distilExport(exportRun.envelope);
+            inspection.exported_scripts = exported.total;
+            mergeExportDigests(inspection.scripts, importedExportItems(exported.items));
+          } else {
+            add(`export-web-scripts failed: ${exportRun.reason}`);
+          }
+        } catch (err) {
+          add(`export-web-scripts failed: ${err.message}`);
+        } finally {
+          await rm(dir, { recursive: true, force: true }).catch(() => {});
+        }
+      } else {
+        inspection.exported_scripts = null;
+        add(`script export skipped: not enough budget left (${budget}ms held)`);
+      }
+    } else if (inspection.scripts_total === 0) {
+      add('no scripts were retained in the inspection window');
+    }
+
+    // REA's own result limitations travel to the verdict (via reaOutcome) — the
+    // never-drop rule applies to the engine just as much as to a fetch.
+    return { ok: true, inspection: { ...inspection, limitations: [...limitations, ...inspection.limitations] } };
+  } finally {
+    await closer(target.cdpEndpoint, target.targetId);
+  }
+}
+
+const clip = (v, n = 200) => (v === null || v === undefined ? null : String(v).slice(0, n));
+
+function hostOf(raw) {
+  try {
+    return new URL(String(raw)).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function countsByHost(urls) {
+  const counts = {};
+  for (const url of urls) {
+    const host = hostOf(url);
+    if (host) counts[host] = (counts[host] || 0) + 1;
+  }
+  return counts;
+}
+
+function distilInspection(envelope, origin) {
+  const nr = envelope?.normalized_result ?? {};
+  const target = nr.target ?? {};
+  const items = Array.isArray(nr.scripts?.items) ? nr.scripts.items : [];
+
+  // `source` (the script text REA retained) is the one field that must NEVER
+  // cross this boundary — Count/URL/digest only. The pick below enumerates the
+  // fields it copies rather than spreading the item, which is the guard: a new
+  // verbose field in the envelope cannot leak into the payload by default.
+  const scripts = items.slice(0, 10).map((item) => ({
+    url: clip(item?.url ?? '(inline)'),
+    is_module: item?.is_module === true,
+    length: typeof item?.length === 'number' ? item.length : null,
+    source_map_url: clip(item?.source_map_url),
+    source_digest: item?.cdp_hash ? String(item.cdp_hash) : null,
+  }));
+
+  const resources = Array.isArray(nr.resources) ? nr.resources : [];
+  const resourceTypes = {};
+  for (const r of resources) {
+    const t = String(r?.type ?? 'other');
+    resourceTypes[t] = (resourceTypes[t] || 0) + 1;
+  }
+
+  const domUrls = (Array.isArray(nr.metadata?.dom_urls) ? nr.metadata.dom_urls : [])
+    .filter((d) => typeof d?.url === 'string' && d.url)
+    // A scope the engine never reported must not read as a green light: only
+    // an explicit "approved" is treated as inside policy, everything else is
+    // "outside" until the engine says otherwise.
+    .map((d) => ({ url: d.url, scope: d.destination_scope === 'approved' ? 'approved' : 'outside' }));
+
+  const thirdParty = new Set();
+  for (const d of domUrls) {
+    if (d.scope === 'outside') {
+      const host = hostOf(d.url);
+      if (host) thirdParty.add(host);
+    }
+  }
+  const targetHost = hostOf(target.url ?? origin);
+  for (const item of items) {
+    const host = hostOf(item?.origin ?? item?.url);
+    if (host && host !== targetHost) thirdParty.add(host);
+  }
+
+  const storage = nr.storage ?? {};
+  const keyArrays = [
+    storage.local_storage_keys,
+    storage.session_storage_keys,
+    storage.indexed_db_names,
+    storage.cache_names,
+  ];
+  return {
+    scripts_total: nr.scripts?.total ?? items.length,
+    scripts,
+    script_domain_counts: countsByHost(items.map((i) => i?.origin ?? i?.url)),
+    resource_type_counts: resourceTypes,
+    third_party: {
+      approved_dom_urls: domUrls.filter((d) => d.scope === 'approved').map((d) => clip(d.url)).slice(0, 12),
+      outside_policy_dom_urls: domUrls.filter((d) => d.scope === 'outside').map((d) => clip(d.url)).slice(0, 12),
+      third_party_domains: (Array.from(thirdParty)).slice(0, 12),
+    },
+    event_listeners: [],
+    webmcp_tools: [],
+    storage: {
+      origin: clip(storage.origin),
+      usage_bytes: typeof storage.usage_bytes === 'number' ? storage.usage_bytes : null,
+      quota_bytes: typeof storage.quota_bytes === 'number' ? storage.quota_bytes : null,
+      // Values and names never ship; presence is the evidence. The key names
+      // REA carried in the capture stay in the temp file and nowhere else.
+      has_keys: keyArrays.some((a) => Array.isArray(a) && a.length > 0),
+    },
+    workers: Number.isInteger(nr.workers?.length) ? nr.workers.length : 0,
+    console_events: Number.isInteger(nr.console?.events?.length) ? nr.console.events.length : 0,
+    network_requests: Number.isInteger(nr.network?.requests?.length) ? nr.network.requests.length : 0,
+    target: {
+      title: clip(target.title),
+      url: clip(target.url),
+      origin: clip(target.origin ?? origin),
+    },
+    confidence: envelope?.confidence ?? null,
+    // Key engine caveats, first sentence only — these speak for five longer
+    // variants of the same caveat.
+    limitations: (nr.limitations ?? []).slice(0, 4).map((l) => String(l).split('. ')[0]).slice(0, 4),
+  };
+}
+
+function distilEventListeners(envelope, origin) {
+  const nr = envelope?.normalized_result ?? {};
+  return (Array.isArray(nr.listeners) ? nr.listeners : [])
+    .slice(0, 5)
+    .map((l) => ({
+      type: clip(l?.type, 40),
+      // The callback's script URL can sit outside the allowed origin (a
+      // framework bundle on a CDN) — that URL is evidence, kept verbatim.
+      url: clip(l?.location?.url),
+      line: Number.isInteger(l?.location?.line_number) ? l.location.line_number : null,
+      column: Number.isInteger(l?.location?.column_number) ? l.location.column_number : null,
+    }));
+}
+
+function distilWebmcpTools(envelope) {
+  const nr = envelope?.normalized_result ?? {};
+  const items = Array.isArray(nr.tools?.items) ? nr.tools.items : [];
+  const names = new Set();
+  for (const item of items) {
+    const name = item?.name ?? item?.tool ?? null;
+    if (name) names.add(clip(name, 120));
+    if (names.size >= 12) break;
+  }
+  // Page-declared metadata is untrusted: only the name travels. The tag keeps
+  // the reader from firing at the page based on a self-declared surface.
+  return Array.from(names).map((name) => ({ name, declared: true }));
+}
+
+function distilExport(envelope) {
+  const nr = envelope?.normalized_result ?? {};
+  const scripts = Array.isArray(nr.scripts) ? nr.scripts : [];
+  return {
+    total: scripts.length,
+    items: scripts.map((s) => ({
+      url: clip(s?.url),
+      sha256: typeof s?.content?.sha256 === 'string' ? s.content.sha256 : null,
+      bytes: typeof s?.content?.bytes === 'number' ? s.content.bytes : null,
+    })),
+  };
+}
+
+// Kept separate from distilExport for tests: the merge only ever replaces a
+// digest, never adds a new script — a mismatch is a REA shell quirk that must
+// not grow the payload.
+function importedExportItems(items) {
+  return items.filter((i) => i.sha256);
+}
+
+function mergeExportDigests(scripts, exported) {
+  const byUrl = new Map(exported.map((e) => [e.url, e.sha256]));
+  const byPath = new Map(exported.map((e) => [hostPathOf(e.url), e.sha256]));
+  for (const script of scripts) {
+    const digest = byUrl.get(script.url) ?? byPath.get(hostPathOf(script.url));
+    if (digest) script.source_digest = digest;
+  }
+}
+
+// Export URLs keep their query/fragment identity, while inspect inventory URLs
+// sometimes differ only by those — matching on scheme+host+path is the honest
+// common denominator.
+function hostPathOf(raw) {
+  try {
+    const u = new URL(String(raw));
+    return `${u.host}${u.pathname}`;
+  } catch {
+    return null;
+  }
+}
 function distilJsAnalysis(envelope, filesDownloaded) {
   const nr = envelope?.normalized_result ?? {};
   const stats = nr.statistics ?? {};

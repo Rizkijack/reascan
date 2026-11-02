@@ -153,11 +153,47 @@ async function httpPutJson(url, timeoutMs = 5000) {
   return res.json();
 }
 
-// Open a fresh blank page target for this capture. Reusing an arbitrary
-// existing target is racy: the target can close between discovery and the
-// REA call, which surfaces as target_unavailable. A fresh target is ours.
-async function newPageTarget() {
-  const target = await httpPutJson(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`);
+// Open a fresh page target for this capture. Reusing an arbitrary existing
+// target is racy: the target can close between discovery and the REA call,
+// which surfaces as target_unavailable. A fresh target is ours, and for the
+// passive inspect flow it opens directly at the target URL. That navigation
+// before REA ever attaches is load-bearing there: a page that has been sitting
+// in the shared browser for a while can be re-attached to indefinitely with
+// zero retained scripts, while a page that is still freshly loading reports
+// its scripts (verified live against example.com and wikipedia.org).
+// -------- target factory (shared by capture + the passive inspect flow) ------
+//
+// Single responsibility: hand callers a *private* page target at a URL they
+// choose, plus the close helper that pairs with it. Nothing memoises — the
+// memoised boot answer must stop AT the running browser, or a second category
+// attaching to the target the first category navigated collapses both callers
+// onto one page (live-verified: the later attach saw a blank page and shipped
+// an empty inspection with a confident verdict).
+//
+// Targets are never grown inside the browser forever: inspectWebPage closes
+// its target in `finally` via closeTarget, so repeat analyses do not leak
+// pages into the shared profile.
+
+export async function newTargetAt(targetUrl = 'about:blank') {
+  return newPageTarget(targetUrl);
+}
+
+export async function closeTarget(cdpEndpoint, targetId, { timeoutMs = 3000 } = {}) {
+  try {
+    const res = await fetch(`${cdpEndpoint}/json/close/${targetId}`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return { ok: res.ok ?? true, reason: res.ok ? null : `HTTP ${res.status}` };
+  } catch (err) {
+    // A target that refuses to close is a leak, not a failure: the caller's
+    // category result is already decided by now.
+    return { ok: false, reason: `target close failed: ${err.message}` };
+  }
+}
+
+async function newPageTarget(targetUrl = 'about:blank') {
+  const target = await httpPutJson(`http://127.0.0.1:${CDP_PORT}/json/new?${targetUrl}`);
   if (!target?.id) throw new Error('CDP did not return a new target id');
   return { cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, targetId: target.id };
 }
@@ -248,6 +284,12 @@ let envInFlight = null;
 
 // Ensure the full browser-capture environment. Idempotent: running helpers
 // are reused, missing ones are started.
+//
+// The memo deliberately carries NO targetUrl. A collapssed memo previously let
+// a second category (webInspect) land on whatever page the first category
+// (browserCapture) had navigated - live-verified as a blank-page inspection
+// with a confident verdict. Callers that need a page at a specific URL create
+// their own target with newTargetAt() and close it with closeTarget().
 export async function ensureBrowserCaptureEnv() {
   if (!envInFlight) {
     envInFlight = (async () => {

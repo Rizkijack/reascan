@@ -133,6 +133,14 @@ export function isDeniedIp(ip) {
   return candidates.some((c) => DENYLIST_CIDRS.some((cidr) => ipInCidr(c, cidr)));
 }
 
+// Category contract — the same list vm-adapter/server.js serves as
+// KNOWN_CATEGORIES. This declaration exists for parity, exactly like the
+// denylist above: the edge forwards categories verbatim and the adapter stays
+// the authority that ignores unknown ones with a named limitation, but this
+// copy lets a test pin both declarations changing together instead of drifting
+// apart when the next category lands in only one of them.
+export const KNOWN_CATEGORIES = ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep', 'webInspect'];
+
 const defaultDns = {
   // Workers' node:dns implements resolve4/resolve6 but NOT lookup — lookup
   // throws "Not implemented" at the edge, so resolve* is the only path here.

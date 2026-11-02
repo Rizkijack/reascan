@@ -8,7 +8,7 @@ Website = output layer only. VM = analysis engine. Zero compute on Cloudflare ed
 
 ## What it does
 
-User pastes a target URL → the request is validated (SSRF guard) and forwarded through a Cloudflare Tunnel to the VM adapter → the adapter fingerprints the target (server/framework/CDN/TLS) and inventories its JS bundles (scripts, sourcemaps, endpoints, obfuscation) → findings come back as structured JSON and render in the same page.
+User pastes a target URL → the request is validated (SSRF guard) and forwarded through a Cloudflare Tunnel to the VM adapter → the adapter fingerprints the target (server/framework/CDN/TLS), inventories its JS bundles (scripts, sourcemaps, endpoints, obfuscation), and when either REA browser category is requested runs passive browser evidence on the VM (screenshot/network capture, static deep analysis, or passive CDP page inspection) → findings come back as structured JSON and render in the same page.
 
 Findings follow the **REA evidence standard** — not a numeric score:
 

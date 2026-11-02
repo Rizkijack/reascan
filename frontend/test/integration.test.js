@@ -51,8 +51,8 @@ test('the adapter refuses an unauthenticated health check', async () => {
     assert.equal(ok.status, 200);
     assert.deepEqual(await ok.json(), {
       status: 'ok',
-      tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'],
-      rea_tools: ['browser.capture', 'js.analyzeDeep'],
+      tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep', 'webInspect'],
+      rea_tools: ['browser.capture', 'js.analyzeDeep', 'web.inspectPage'],
     });
   });
 });

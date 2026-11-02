@@ -19,9 +19,10 @@ import { callReaTool, REA_TOOLS } from './lib/reaMcp.js';
 const REQUEST_TIMEOUT_MS = 70000;
 const MAX_BODY_BYTES = 8192;
 
-// The four categories this engine can actually run — the same list the form
-// ships as checkboxes. Anything else a client asks for is reported, never run.
-const KNOWN_CATEGORIES = ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'];
+// The five categories this engine can actually run — the same list the form
+// ships as checkboxes, and the same list the edge function declares functions/api/analyze.js.
+// Anything else a client asks for is reported, never run.
+export const KNOWN_CATEGORIES = ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep', 'webInspect'];
 
 // Comparing lengths first is not optional: timingSafeEqual throws on buffers of
 // different lengths, and branching on length alone would be a shorter oracle than
@@ -67,9 +68,9 @@ function send(res, status, payload) {
   res.end(body);
 }
 
-// Turn a successful {ok:true, capture|analysis} REA answer into the task shape
-// the rest of handleAnalyze consumes. Exported so node --test can pin the
-// hoisting without spawning a browser or the rea binary.
+// Turn a successful {ok:true, capture|analysis|inspection} REA answer into the
+// task shape the rest of handleAnalyze consumes. Exported so node --test can
+// pin the hoisting without spawning a browser or the rea binary.
 //
 // distilCapture/distilJsAnalysis carry their own limitations (a failed
 // screenshot step, a bundle the engine could not parse). Hoisting them into the
@@ -78,7 +79,7 @@ function send(res, status, payload) {
 // is then stripped from the payload, the same shape fingerprint and js_bundles
 // already ship: findings only in the section, limitations only in the verdict.
 export function reaOutcome(result) {
-  const { limitations = [], ...data } = result.capture ?? result.analysis ?? {};
+  const { limitations = [], ...data } = result.capture ?? result.analysis ?? result.inspection ?? {};
   return { data: Object.keys(data).length ? data : null, limitations: limitations.map(String) };
 }
 
@@ -159,6 +160,10 @@ async function handleAnalyze(req, res, env) {
     ? reaTask('js.analyzeDeep')
     : Promise.resolve(emptyRea);
 
+  const webInspectTask = requested.includes('webInspect')
+    ? reaTask('web.inspectPage')
+    : Promise.resolve(emptyRea);
+
   // Worst case for jsBundle is 40 bundles across 6 workers at 10s each, which is
   // roughly 70s — right at the edge of the 75s the Pages Function allows this
   // whole request. The
@@ -175,16 +180,20 @@ async function handleAnalyze(req, res, env) {
   let bundles;
   let browser;
   let jsDeep;
+  let webInspect;
   try {
-    [fp, bundles, browser, jsDeep] = await Promise.race([
-      Promise.all([fpTask, bundleTask, browserTask, jsDeepTask]),
+    [fp, bundles, browser, jsDeep, webInspect] = await Promise.race([
+      Promise.all([fpTask, bundleTask, browserTask, jsDeepTask, webInspectTask]),
       deadline,
     ]);
   } catch (err) {
     return send(res, 504, { status: 'error', error: err.message });
   }
 
-  const limitations = [...fp.limitations, ...bundles.limitations, ...browser.limitations, ...jsDeep.limitations];
+  const limitations = [
+    ...fp.limitations, ...bundles.limitations, ...browser.limitations, ...jsDeep.limitations,
+    ...webInspect.limitations,
+  ];
   if (unknownCategories.length) {
     limitations.push(`unknown categories ignored: ${unknownCategories.join(', ')} (known: ${KNOWN_CATEGORIES.join(', ')})`);
   }
@@ -199,6 +208,7 @@ async function handleAnalyze(req, res, env) {
       js_bundles: bundles.bundles,
       browser_capture: browser.data,
       js_deep: jsDeep.data,
+      web_inspect: webInspect.data,
       verdict,
     },
     duration_ms: Date.now() - started,
@@ -218,7 +228,7 @@ export function createAdapter(env) {
       }
 
       if (req.method === 'GET' && req.url === '/health') {
-        return send(res, 200, { status: 'ok', tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'], rea_tools: REA_TOOLS });
+        return send(res, 200, { status: 'ok', tools_available: [...KNOWN_CATEGORIES], rea_tools: REA_TOOLS });
       }
       if (req.method === 'POST' && req.url === '/analyze') {
         return await handleAnalyze(req, res, env);

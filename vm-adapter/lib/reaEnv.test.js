@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseUpstreamProxy, proxyArgsFor } from './reaEnv.js';
+import { parseUpstreamProxy, proxyArgsFor, newTargetAt, closeTarget } from './reaEnv.js';
 
 // Clear-then-set, not set-in-order: on Windows process.env is case-insensitive,
 // so writing `https_proxy` and then "clearing" `HTTPS_PROXY` would delete the
@@ -176,4 +176,51 @@ test('concurrent cold starts share one attempt instead of racing the profile loc
     assert.ok(results.every((result) => result === results[0]),
       'every concurrent caller should observe the same in-flight attempt');
   });
+});
+
+// --- target factory (newTargetAt / closeTarget) ------------------------------
+// These two own the page lifecycle of the passive inspect category. reaEnv
+// dials the loopback CDP HTTP API directly, so the test seam is the global
+// fetch itself — swapped and restored exactly like the other globals in the
+// smoke harness pattern this repo already uses.
+
+test('newTargetAt opens a page target at the caller-chosen URL', async () => {
+  const calls = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method ?? 'GET' });
+    return {
+      ok: true,
+      json: async () => ({ id: 'TARGET_ID_1', type: 'page', url: 'about:blank' }),
+    };
+  };
+  try {
+    const target = await newTargetAt('https://example.com/');
+    assert.equal(target.targetId, 'TARGET_ID_1');
+    assert.ok(target.cdpEndpoint.startsWith('http://127.0.0.1:'), target.cdpEndpoint);
+    assert.equal(calls[0].method, 'PUT');
+    assert.ok(calls[0].url.includes('/json/new?'), `a create call was expected, got ${calls[0].url}`);
+    assert.ok(calls[0].url.includes('example.com'), 'the page must open at the target URL, not blank');
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test('closeTarget never throws: a refusing CDP degrades to a leak report', async () => {
+  const real = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push(String(url));
+    if (calls.length === 1) throw new Error('ECONNREFUSED-style refusal');
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const refused = await closeTarget('http://127.0.0.1:9000', 'SOME_TARGET');
+    assert.equal(refused.ok, false);
+    assert.match(refused.reason, /target close failed/);
+    const clean = await closeTarget('http://127.0.0.1:9000', 'SOME_TARGET');
+    assert.equal(clean.ok, true);
+  } finally {
+    globalThis.fetch = real;
+  }
 });

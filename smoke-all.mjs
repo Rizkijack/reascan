@@ -24,9 +24,9 @@ import { isDeniedIp, ipInCidr, validateUrl, resolvePublic, safeFetch, safeTlsInf
 import { readCapped } from './vm-adapter/lib/body.js';
 import { fingerprint } from './vm-adapter/modules/fingerprint.js';
 import { analyzeBundles } from './vm-adapter/modules/jsBundle.js';
-import { createAdapter } from './vm-adapter/server.js';
+import { createAdapter, KNOWN_CATEGORIES as ADAPTER_CATEGORIES } from './vm-adapter/server.js';
 import { callReaTool, REA_MCP_ENABLED, REA_TOOLS } from './vm-adapter/lib/reaMcp.js';
-import { onRequestPost, validateUrl as edgeValidateUrl, DENYLIST_CIDRS as EDGE_CIDRS, normalizeAddresses } from './functions/api/analyze.js';
+import { onRequestPost, validateUrl as edgeValidateUrl, DENYLIST_CIDRS as EDGE_CIDRS, normalizeAddresses, KNOWN_CATEGORIES as EDGE_CATEGORIES } from './functions/api/analyze.js';
 import { onRequestGet as healthGet } from './functions/api/health.js';
 
 // ---------------------------------------------------------------- harness
@@ -518,7 +518,7 @@ group('reaMcp.js (phase-2 integration)');
   // that what the integration *advertises* matches what it can *dispatch* — a
   // declared-but-unknown tool would be an operator-visible lie on /health.
   check('the REA integration is live, not a stub', REA_MCP_ENABLED === true);
-  check('declares the expected tool set', REA_TOOLS.length === 2 && REA_TOOLS.includes('browser.capture') && REA_TOOLS.includes('js.analyzeDeep'), REA_TOOLS.join(','));
+  check('declares the expected tool set', REA_TOOLS.length === 3 && REA_TOOLS.includes('browser.capture') && REA_TOOLS.includes('js.analyzeDeep') && REA_TOOLS.includes('web.inspectPage'), REA_TOOLS.join(','));
   // Called without a url on purpose: the guard short-circuits before any dispatch,
   // so this proves the case is recognised without launching a browser.
   const known = await Promise.all(REA_TOOLS.map((t) => callReaTool(t, {})));
@@ -526,6 +526,51 @@ group('reaMcp.js (phase-2 integration)');
   const r = await callReaTool('asar.extract', { url: 'https://example.com/' });
   check('an engine-less category fails visibly instead of pretending', r.ok === false && /not installed on this VM/.test(r.reason), r.reason);
   check('an unknown tool is rejected, not silently accepted', (await callReaTool('nope', { url: 'https://example.com/' })).ok === false);
+}
+
+// ================================================================ STEP 5B
+section('step 5b — webInspect (passive CDP page inspection)');
+
+group('category declared in both guards, in sync');
+{
+  // Same rule as the denylist: the list lives in two places and must be pinned
+  // to change together, or the edge and the adapter drift apart silently.
+  check('the edge and adapter category lists are identical',
+    JSON.stringify(EDGE_CATEGORIES) === JSON.stringify(ADAPTER_CATEGORIES), `${JSON.stringify(EDGE_CATEGORIES)} vs ${JSON.stringify(ADAPTER_CATEGORIES)}`);
+  check('webInspect is a member of both', EDGE_CATEGORIES.includes('webInspect') && ADAPTER_CATEGORIES.includes('webInspect'));
+  const s = createAdapter({ API_KEY: 'smoke-key-0123456789abcdef' });
+  await new Promise((res) => s.listen(0, '127.0.0.1', res));
+  try {
+    const health = await (await fetch(`http://127.0.0.1:${s.address().port}/health`, { headers: { 'x-api-key': 'smoke-key-0123456789abcdef' } })).json();
+    check('/health advertises webInspect as a category', health.tools_available.includes('webInspect'), JSON.stringify(health.tools_available));
+    check('/health advertises web.inspectPage as a REA tool', health.rea_tools.includes('web.inspectPage'), JSON.stringify(health.rea_tools));
+  } finally { await new Promise((res) => s.close(res)); }
+}
+
+group('frontend carries the category and renders the section without innerHTML');
+{
+  const app = readFileSync('frontend/app.html', 'utf8');
+  const appjs = readFileSync('frontend/app.js', 'utf8');
+  check('the analyzer form ships the webInspect checkbox', app.includes('value="webInspect"'));
+  check('app.js renders the Web inspect section', appjs.includes("renderWebInspect(findings.web_inspect)") && appjs.includes('Web inspect (REA)'));
+  check('the renderer copies explicit fields, never a spread of the envelope',
+    !/renderWebInspect[\s\S]{0,4500}\.\.\.\s*(item|s|i|l)/.test(appjs), 'a spread would ship new envelope fields by default');
+  check('the style budget stays where it was', !/webInspect|web_inspect/.test(readFileSync('frontend/style.css', 'utf8')), 'no bespoke CSS for this section');
+}
+
+group('no source text crosses the boundary (adapter distillation)');
+{
+  const cli = readFileSync('vm-adapter/lib/reaCli.js', 'utf8');
+  const inspectPart = cli.slice(cli.indexOf('export async function inspectWebPage'));
+  // The guard is structural: distilInspection enumerates the fields it copies.
+  // If it ever spreads the item (or copies item.source), new envelope fields -
+  // including the retained script text - would ship by default.
+  const distiller = cli.slice(cli.indexOf('function distilInspection'), cli.indexOf('function distilEventListeners'));
+  check('distilInspection enumerates fields instead of spreading the script item',
+    distiller.includes('source_digest') && !/\.\.\.item/.test(distiller) && !/source:\s*[^,}]/.test(distiller));
+  check('no source-text field name appears in the distiller', !/source_text|sourceText/.test(distiller));
+  check('rejected CLI tools stay unwired (OOM / non-inspect shapes from the capture stage)',
+    !cli.includes('trace-web-module-imports') && !cli.includes('compare-web-captures') && !cli.includes('observe-web-session') && !cli.includes('analyze-web-bundle'));
 }
 
 // ================================================================ STEP 6

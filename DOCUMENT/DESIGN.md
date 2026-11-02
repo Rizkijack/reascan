@@ -296,8 +296,8 @@ export function createAdapter(env) → http.Server   // test bind ke port 0 (eph
 POST /analyze: auth (X-API-Key, bandingkan panjang dulu lalu crypto.timingSafeEqual)
   → validateUrl → Promise.all([fingerprint, jsBundle]) → buildVerdict → 200 JSON
 GET /health → 200 { status: 'ok',
-  tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'],
-  rea_tools: ['browser.capture', 'js.analyzeDeep'] }
+  tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep', 'webInspect'],
+  rea_tools: ['browser.capture', 'js.analyzeDeep', 'web.inspectPage'] }
 
 // Error mapping:
 401 auth gagal | 404 route/method tidak dikenal | 422 URL blocked / body rusak / body kepanjangan
@@ -546,6 +546,35 @@ Aturan limitations REA (dikunci oleh test `reaOutcome` di `vm-adapter/server.tes
 - `unknowns` milik `js_deep` TIDAK dihoist — tetap di section-nya dan dirender di sana oleh `app.js`. Ini berbeda dengan `verdict.unknowns`, yang hanya berasal dari fingerprint (cdn/framework) lewat `buildVerdict()`.
 
 Frontend merender kedua section ini tanpa `innerHTML` (nilai capture bersifat target-controlled — lihat komentar header `app.js`): screenshot sebagai `<img>` dari data URL (dibatasi 500KB oleh adapter), event counts + resource-type breakdown sebagai baris meta, signals `obfuscation_signals` sebagai chips evidence di kartu bundle.
+
+### Kategori REA: web_inspect (inspeksi CDP pasif)
+
+Kategori ketiga REA (`webInspect`, tool `web.inspectPage`, `lib/reaCli.js::inspectWebPage`) — inspeksi CDP pasif yang jsBundle tidak punya: script yang benar-benar diparse browser, lokasi listener, footprint storage, domain pihak ketiga, dan surface WebMCP. Empat invokasi CLI REA satu deadline (`timeoutMs` = anggaran seluruh kategori, sisa anggaran tiap fase):
+
+1. target halaman BARU dibuka di URL target (`ensureBrowserCaptureEnv({targetUrl})` — navigasi pra-attach `inspect-web-page` wajib; re-attach ke target usang membuang script yang tersimpan [bukti live example.com]), lalu `inspect-web-page --allowed-origins <origin> --include-script-sources --include-storage-keys`
+2. `inspect-web-event-listeners` — satu selector (`button`), hanya lokasi callback
+3. `discover-webmcp-tools` — nama tool page-declared (untrusted, REA tidak pernah invoke)
+4. `export-web-scripts` — hanya bila script tersimpan; sumber tetap di disk (temp VM) untuk audit lokal, SHA-256 manifest menggantikan digest inventaris, direktori dihapus di `finally`
+
+Payload `web_inspect` (null bila tak diminta / env browser gagal):
+
+```json
+{
+  "scripts_total": 3, "exported_scripts": 3,
+  "scripts": [ { "url": "https://t.example/app.js", "is_module": true, "length": 12000,
+                 "source_map_url": "https://t.example/app.js.map", "source_digest": "…" } ],
+  "script_domain_counts": {}, "resource_type_counts": {},
+  "third_party": { "approved_dom_urls": [], "outside_policy_dom_urls": [],
+                   "third_party_domains": ["analytics.example"] },
+  "event_listeners": [ { "type": "click", "url": "https://cdn.example/f.js", "line": 3, "column": 4251 } ],
+  "webmcp_tools": [ { "name": "page.search", "declared": true } ],
+  "storage": { "origin": "https://t.example", "usage_bytes": 0, "quota_bytes": 42, "has_keys": false },
+  "workers": 0, "console_events": 0, "network_requests": 0,
+  "target": { "title": "…", "url": "https://t.example/", "origin": "https://t.example" }
+}
+```
+
+Aturan kategori ini: TANPA source text, tanpa DOM, tanpa nilai storage di payload (hanya `has_keys` boolean — capture file di VM menyimpan sisanya dan terhapus); distilasi memakai allow-list field (`scripts≤10`, listeners≤5, domain≤12, nama≤12), jadi field envelope baru tidak bisa bocor lewat spread; sub-invokasi yang menolak jadi `verdict.limitations` (`"inspect-web-event-listeners failed: …"`), bukan gagal-kategori; tool `analyze-web-bundle` (OOM di situs berat), `compare-web-captures`, `inspect-web-network-capture`, dan `observe-web-session` sengaja TIDAK dihubungkan. Daftar kategori terdeklarasi di DUA tempat (`server.js` + `functions/api/analyze.js`, pola yang sama dengan denylist) dan dipin sync oleh smoke.
 
 ---
 

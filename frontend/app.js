@@ -445,6 +445,92 @@ function renderJsDeep(deep) {
   return wrap;
 }
 
+// Passive CDP inspection (REA). Everything here is a count, a URL, a digest,
+// or a name from the adapter's distilled `web_inspect` payload - no source
+// text ever ships, so there is nothing unbounded to render.
+function renderWebInspect(wi) {
+  const wrap = document.createDocumentFragment();
+  if (!wi) return wrap;
+
+  wrap.append(el('h3', null, 'Web inspect (REA)'));
+
+  const meta = [];
+  if (wi.target?.title) meta.push(`page ${wi.target.title}`);
+  if (wi.target?.url) meta.push(wi.target.url);
+  if (wi.scripts_total != null) meta.push(`${wi.scripts_total} scripts seen`);
+  if (wi.exported_scripts != null) meta.push(`${wi.exported_scripts} sources exported (sha256-verified)`);
+  if (wi.workers) meta.push(`${wi.workers} worker(s)`);
+  if (wi.console_events) meta.push(`${wi.console_events} console message(s)`);
+  if (wi.network_requests) meta.push(`${wi.network_requests} network request(s)`);
+  if (meta.length) wrap.append(el('div', 'meta', el('span', null, meta.join(' · '))));
+
+  const rt = Object.entries(wi.resource_type_counts ?? {})
+    .filter(([, v]) => typeof v === 'number' && v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${v} ${k}`);
+  if (rt.length) wrap.append(el('div', 'meta', el('span', null, `resource types: ${rt.join(' · ')}`)));
+
+  if (wi.scripts?.length) {
+    const holder = el('div', 'table-wrap');
+    const table = el('table', 'report-table');
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (const label of ['Script URL', 'Module', 'Bytes', 'Sourcemap', 'Digest']) {
+      headRow.append(el('th', null, label));
+    }
+    thead.append(headRow);
+    const tbody = document.createElement('tbody');
+    for (const s of wi.scripts) {
+      const row = document.createElement('tr');
+      row.append(
+        el('td', null, el('code', null, String(s.url ?? ''))),
+        el('td', null, s.is_module ? 'yes' : 'no'),
+        el('td', null, s.length != null ? String(s.length) : '-'),
+        el('td', null, s.source_map_url ? 'declared' : '-'),
+        el('td', null, el('code', null, s.source_digest ? String(s.source_digest) : '-')),
+      );
+      tbody.append(row);
+    }
+    table.append(thead, tbody);
+    holder.append(table);
+    wrap.append(holder);
+  }
+
+  const thirdParty = wi.third_party?.third_party_domains ?? [];
+  if (thirdParty.length) {
+    wrap.append(el('h4', null, `Third-party destinations (${thirdParty.length})`));
+    const chips = el('div', 'signals');
+    for (const d of thirdParty) chips.append(el('code', null, String(d)));
+    wrap.append(chips);
+  }
+
+  if (wi.event_listeners?.length) {
+    wrap.append(el('h4', null, `Event listeners (button, ${wi.event_listeners.length})`));
+    const ul = document.createElement('ul');
+    for (const l of wi.event_listeners) {
+      const where = l.line != null ? ` @ ${l.line}:${l.column ?? 0}` : '';
+      ul.append(el('li', null, `${l.type ?? 'listener'}${where} - ${l.url ?? 'unknown script'}`));
+    }
+    wrap.append(ul);
+  }
+
+  if (wi.webmcp_tools?.length) {
+    wrap.append(el('h4', null, `WebMCP tools declared (${wi.webmcp_tools.length})`));
+    const chips = el('div', 'signals');
+    for (const t of wi.webmcp_tools) chips.append(el('code', null, `${String(t.name)} (page-declared)`));
+    wrap.append(chips);
+  }
+
+  const st = wi.storage;
+  if (st) {
+    const used = st.usage_bytes != null ? `${st.usage_bytes} B` : 'unknown';
+    const quota = st.quota_bytes != null ? `${st.quota_bytes} B` : 'unknown';
+    wrap.append(el('div', 'meta', el('span', null, `storage ${st.origin ?? ''}: ${used} used of ${quota} quota - keys present: ${st.has_keys ? 'yes' : 'no'}`)));
+  }
+
+  return wrap;
+}
+
 function renderFindings(findings) {
   const body = $('findings-body');
   body.textContent = '';
@@ -455,6 +541,7 @@ function renderFindings(findings) {
   body.append(renderBundles(findings.js_bundles));
   body.append(renderBrowserCapture(findings.browser_capture));
   body.append(renderJsDeep(findings.js_deep));
+  body.append(renderWebInspect(findings.web_inspect));
 }
 
 // Strip of real numbers (payload counts) + donut (confidence distribution) +

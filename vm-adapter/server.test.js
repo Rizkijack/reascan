@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -34,8 +34,8 @@ test('health responds only with the correct key', async () => {
     assert.equal(ok.status, 200);
     assert.deepEqual(await ok.json(), {
       status: 'ok',
-      tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep'],
-      rea_tools: ['browser.capture', 'js.analyzeDeep'],
+      tools_available: ['fingerprint', 'jsBundle', 'browserCapture', 'jsDeep', 'webInspect'],
+      rea_tools: ['browser.capture', 'js.analyzeDeep', 'web.inspectPage'],
     });
   });
 });
@@ -204,6 +204,16 @@ test('reaOutcome hoists limitations and strips them from the payload', () => {
   assert.equal(analysis.data.limitations, undefined);
   assert.equal(analysis.data.modules, 7);
 
+  // The web inspect category ships its distilled inspection through the same
+  // limitations-hoisting contract.
+  const inspection = reaOutcome({
+    ok: true,
+    inspection: { scripts_total: 3, limitations: ['inspect-web-event-listeners failed: timed out'] },
+  });
+  assert.deepEqual(inspection.limitations, ['inspect-web-event-listeners failed: timed out']);
+  assert.equal(inspection.data.limitations, undefined);
+  assert.equal(inspection.data.scripts_total, 3);
+
   // No limitations at all: payload passes through untouched, task is clean.
   const clean = reaOutcome({ ok: true, capture: { final_url: 'https://example.com/' } });
   assert.deepEqual(clean.limitations, []);
@@ -252,5 +262,52 @@ test('REA limitations reach the verdict and stay out of the section payload', as
     if (prev === undefined) delete process.env.REA_BIN;
     else process.env.REA_BIN = prev;
     _resetBinaryCache();
+  }
+});
+
+// The web inspect category end to end: server -> callReaTool -> inspectWebPage
+// -> four REA CLI invocations (inspect / listeners / webmcp / export), all
+// served by one fake binary that branches on the sub-command. Asserted:
+// findings.web_inspect carries the distilled shape, engine limitations land in
+// the verdict, and the script text REA retained in the capture never leaks into
+// the payload — the marker here plays the retained source's part.
+test('webInspect degrades on the server when the browser env is down', async () => {
+  // The four-CLI happy path is pinned against the fake binary in
+  // lib/reaCli.test.js with an injected browser env. Here the server-level
+  // contract is pinned in its failure shape, deterministic on any box: a
+  // browser prerequisite that cannot come up degrades the section to null and
+  // names the cause in verdict.limitations — it never fails the report.
+  const dir = await mkdtemp(join(tmpdir(), 'reascan-fake-rea-'));
+  const bin = join(dir, 'rea.mjs');
+  await writeFile(bin, 'process.stdout.write("{}\\n");', 'utf8');
+  const envPrev = {};
+  const ENV_KEYS = ['REA_BIN', 'REA_CHROME_BIN', 'REA_CDP_PORT',
+    'https_proxy', 'HTTPS_PROXY', 'http_proxy', 'HTTP_PROXY'];
+  for (const k of ENV_KEYS) envPrev[k] = process.env[k];
+  process.env.REA_BIN = bin;
+  process.env.REA_CHROME_BIN = 'C:/definitely/not/installed/chrome.exe';
+  process.env.REA_CDP_PORT = '19723';
+  delete process.env.https_proxy; delete process.env.HTTPS_PROXY;
+  delete process.env.http_proxy; delete process.env.HTTP_PROXY;
+  _resetBinaryCache();
+  try {
+    await withServer({}, async (call) => {
+      const r = await call('/analyze', authed({ url: 'https://example.com/', categories: ['webInspect'] }));
+      assert.equal(r.status, 200);
+      const { findings } = await r.json();
+      assert.equal(findings.web_inspect, null, 'nothing is faked when the browser env is down');
+      assert.ok(
+        findings.verdict.limitations.some((l) => /web\.inspectPage: Chromium CDP did not come up/.test(l) && /could not be started/.test(l)),
+        `the failure must be named, got: ${JSON.stringify(findings.verdict.limitations)}`,
+      );
+      assert.equal(findings.verdict.confidence, 'low');
+    });
+  } finally {
+    for (const k of ENV_KEYS) {
+      if (envPrev[k] === undefined) delete process.env[k];
+      else process.env[k] = envPrev[k];
+    }
+    _resetBinaryCache();
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 });

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { findReaBinary, runReaJson, resolveSpawn, _resetBinaryCache, analyzeJsDeep } from './reaCli.js';
+import { findReaBinary, runReaJson, resolveSpawn, _resetBinaryCache, analyzeJsDeep, inspectWebPage } from './reaCli.js';
 
 // The stand-in is a `.mjs` file, not a shell script with a shebang. resolveSpawn
 // rewrites any .js/.mjs binary to `node <script>`, so the fixture runs on every
@@ -301,4 +301,365 @@ test('analyzeJsDeep still runs REA when the downloads leave budget for it', asyn
       assert.equal(result.analysis.findings, 7);
     },
   );
+});
+
+// --- web inspect -------------------------------------------------------------
+// One fake binary serves all four sub-invocations (inspect / listeners /
+// webmcp / export), keyed on the sub-command exactly as the real CLI reads
+// its argv. The browser env is injected, so no browser is anywhere near the
+// box and every path here is offline.
+
+const INSPECT_ENVELOPE = {
+  normalized_result: {
+    target: { target_id: 'tid', title: 'Example', url: 'https://example.com/', origin: 'https://example.com' },
+    scripts: {
+      total: 2,
+      items: [
+        {
+          script_key: 'k1', url: 'https://example.com/s.js', origin: 'https://example.com',
+          cdp_hash: 'aa11bb22', length: 1579, is_module: false, source_map_url: null,
+          // In production this field is the script's full text. Its presence
+          // here is the point: the distiller must not copy it into the payload.
+          source: { included: true, artifact: { sha256: 'aa11bb22', RETAINED_SOURCE_MARKER: 'NEVER SHIP THIS' } },
+        },
+        { script_key: 'k2', url: 'https://cdn.example/tracker.js', origin: 'https://cdn.example', cdp_hash: 'cc33', length: 10, is_module: true, source_map_url: 'https://cdn.example/tracker.js.map' },
+      ],
+    },
+    resources: [{ type: 'Script' }, { type: 'Script' }, { type: 'Document' }],
+    network: { requests: [] },
+    console: { events: [] },
+    workers: [],
+    metadata: {
+      dom_urls: [
+        { node_index: 1, attribute: 'href', url: 'https://example.com/help', destination_scope: 'approved' },
+        { node_index: 2, attribute: 'href', url: 'https://analytics.example/px', destination_scope: 'outside_policy' },
+      ],
+    },
+    storage: { origin: 'https://example.com', usage_bytes: 0, quota_bytes: 42, local_storage_keys: ['layout'], values_redacted: true },
+    limitations: ['Observation starts when REA attaches; prior activity is unavailable.'],
+  },
+  confidence: 'observed',
+};
+
+const LISTENERS_ENVELOPE = {
+  normalized_result: {
+    selected_node: { match: 'found' },
+    listeners: [
+      { type: 'click', location: { script_id: '52', url: 'https://cdn.example/framework.js', line_number: 3, column_number: 4251 } },
+      { type: 'submit', location: { url: 'https://cdn.example/second.js', line_number: 9, column_number: 2 } },
+    ],
+  },
+  confidence: 'observed',
+};
+
+const WEBMCP_ENVELOPE = {
+  normalized_result: { status: 'available', tools: { total: 1, items: [{ name: 'page.search' }] } },
+  confidence: 'observed',
+};
+
+const EXPORT_ENVELOPE = {
+  normalized_result: {
+    scripts: [{ url: 'https://example.com/s.js', content: { state: 'exported', sha256: 'aa11bb22', bytes: 1579 } }],
+  },
+  confidence: 'derived',
+};
+
+// overwrite: the same envelope dictionary with the sub-command's answer swapped
+// out, so one fixture file can serve several expected shapes per test.
+function webInspectFixture(overrides = {}) {
+  const envelopes = {
+    'inspect-web-page': INSPECT_ENVELOPE,
+    'inspect-web-event-listeners': LISTENERS_ENVELOPE,
+    'discover-webmcp-tools': WEBMCP_ENVELOPE,
+    'export-web-scripts': EXPORT_ENVELOPE,
+    ...overrides,
+  };
+  return `
+    const args = process.argv.slice(2);
+    const printed = JSON.parse(${JSON.stringify(JSON.stringify(envelopes))});
+    const key = Object.keys(printed).find((k) => args.includes(k));
+    let envelope = printed[key];
+    if (key === 'export-web-scripts') {
+      const fs = await import('node:fs/promises');
+      try {
+        const text = await fs.readFile(args[args.indexOf('export-web-scripts') + 1], 'utf8');
+        if (!text.includes('RETAINED_SOURCE_MARKER') || !text.includes('normalized_result')) {
+          envelope = { error: 'fixture: capture file incomplete' };
+        }
+      } catch {
+        envelope = { error: 'fixture: no capture file' };
+      }
+    }
+    process.stdout.write(JSON.stringify(envelope) + '\\n');
+  `;
+}
+
+const fakeBrowserEnv = () => async () => ({ ok: true, cdpEndpoint: 'http://cdp.test', targetId: 'tid' });
+
+test('inspectWebPage distils the four CLI invocations into the evidence shape', async () => {
+  await withFakeBin(webInspectFixture(), async () => {
+    const result = await inspectWebPage('https://example.com/', undefined, {
+      timeoutMs: 30000,
+      browserEnv: fakeBrowserEnv(),
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const wi = result.inspection;
+
+    assert.equal(wi.scripts_total, 2);
+    assert.equal(wi.scripts.length, 2);
+    assert.equal(wi.scripts[0].source_digest, 'aa11bb22', 'export verifies and replaces the inventory digest');
+    assert.equal(wi.scripts[1].is_module, true);
+    assert.equal(wi.exported_scripts, 1);
+    assert.deepEqual(wi.script_domain_counts, { 'example.com': 1, 'cdn.example': 1 });
+    assert.deepEqual(wi.resource_type_counts, { Script: 2, Document: 1 });
+    assert.deepEqual(wi.event_listeners, [
+      { type: 'click', url: 'https://cdn.example/framework.js', line: 3, column: 4251 },
+      { type: 'submit', url: 'https://cdn.example/second.js', line: 9, column: 2 },
+    ]);
+    assert.deepEqual(wi.webmcp_tools, [{ name: 'page.search', declared: true }]);
+    assert.deepEqual(wi.third_party.third_party_domains.sort(), ['analytics.example', 'cdn.example']);
+    assert.deepEqual(wi.third_party.outside_policy_dom_urls, ['https://analytics.example/px']);
+    assert.equal(wi.storage.has_keys, true);
+    assert.equal(wi.storage.usage_bytes, 0);
+    assert.equal(wi.workers, 0);
+    assert.equal(wi.target.url, 'https://example.com/');
+    assert.ok(wi.limitations.some((l) => /Observation starts when REA attaches/.test(l)));
+
+    // The retained source text stayed in the temp capture the CLI read; the
+    // payload carries digests, never the text itself.
+    assert.ok(!JSON.stringify(result).includes('NEVER SHIP THIS'),
+      'no source text may cross the boundary: this is the point of the distillation');
+    // Every failure path stayed a limitation, none threw across the boundary.
+    assert.ok(!/score|percentage/.test(JSON.stringify(wi)), 'the evidence standard carries no numeric verdicts');
+  });
+});
+
+test('inspectWebPage charges the env, the inspect, and every sub-call against one budget', async () => {
+  // The wall-clock check at the parse boundary: the listeners subprocess gets
+  // whatever the inspect phase left, never a fresh full-length timeout. The
+  // inspect answer returns instantly so a measurable amount of the budget is
+  // genuinely spent before the second phase - with a sleeping first phase the
+  // remainder equals the budget and the fresh-vs-remainder bug is invisible.
+  const budgetFixture = `
+    const args = process.argv.slice(2);
+    if (args.includes('inspect-web-page')) {
+      process.stdout.write(JSON.stringify(JSON.parse(${JSON.stringify(JSON.stringify(INSPECT_ENVELOPE))})) + '\\n');
+    } else {
+      // every other sub-command prints nothing and never exits, so the only
+      // way this command ends is reaCli's own deadline (SIGKILL)
+      setInterval(() => {}, 1e6);
+    }
+  `;
+  await withFakeBin(budgetFixture, async () => {
+    // 5000 not 500: after the instant inspect answer the listeners probe must
+    // still be granted the real remainder (~4950ms), while a fresh full-length
+    // allowance (the bug) would be 5000. The 50ms margin comes from the spawn
+    // itself, so the bound cannot invert under load.
+    const budget = 5000;
+    const result = await inspectWebPage('https://example.com/', undefined, {
+      timeoutMs: budget,
+      browserEnv: fakeBrowserEnv(),
+    });
+    assert.equal(result.ok, true);
+    const granted = /inspect-web-event-listeners failed: .*timed out after (\d+)ms/.exec(
+      result.inspection.limitations.join(' '),
+    )?.[1];
+    assert.ok(granted, `expected the listeners probe to record its timeout, got: ${JSON.stringify(result.inspection.limitations)}`);
+    assert.ok(Number(granted) < budget, `the listeners probe got a fresh ${budget}ms allowance instead of the remainder`);
+    assert.ok(Number(granted) >= 150, `the listeners probe was left a degenerate ${granted}ms`);
+  });
+});
+
+test('a refused sub-call is a named limitation, not a discarded category', async () => {
+  await withFakeBin(webInspectFixture({
+    'inspect-web-event-listeners': { error: 'engine refused the listener probe' },
+    'discover-webmcp-tools': { error: 'engine refused the webmcp probe' },
+  }), async () => {
+    const result = await inspectWebPage('https://example.com/', undefined, {
+      timeoutMs: 30000,
+      browserEnv: fakeBrowserEnv(),
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.inspection.event_listeners, []);
+    assert.deepEqual(result.inspection.webmcp_tools, []);
+    assert.ok(result.inspection.limitations.some((l) => l.includes('inspect-web-event-listeners failed: engine refused the listener probe')),
+      JSON.stringify(result.inspection.limitations));
+    assert.ok(result.inspection.limitations.some((l) => l.includes('discover-webmcp-tools failed: engine refused the webmcp probe')),
+      JSON.stringify(result.inspection.limitations));
+  });
+});
+
+test('the export scratch dir is removed even when export fails', {
+  // os.tmpdir() re-reads env per call, so a sandbox root keeps the leak check
+  // hermetic against parallel node --test processes.
+}, async () => {
+  const sandbox = await mkdtemp(join(tmpdir(), 'reascan-tmproot-'));
+  const prev = {};
+  for (const key of ['TMPDIR', 'TEMP', 'TMP']) {
+    prev[key] = process.env[key];
+    process.env[key] = sandbox;
+  }
+  try {
+    await withFakeBin(webInspectFixture({
+      'export-web-scripts': { error: 'persistently refusing engine' },
+    }), async () => {
+      const result = await inspectWebPage('https://example.com/', undefined, {
+        timeoutMs: 30000,
+        browserEnv: fakeBrowserEnv(),
+      });
+      assert.equal(result.ok, true);
+      assert.ok(result.inspection.limitations.some((l) => /export-web-scripts failed/.test(l)),
+        JSON.stringify(result.inspection.limitations));
+      const left = (await readdir(sandbox)).filter((n) => n.startsWith('reascan-webinspect-'));
+      assert.deepEqual(left, [], `temp dirs left behind: ${left.join(', ')}`);
+    });
+  } finally {
+    for (const key of ['TMPDIR', 'TEMP', 'TMP']) {
+      if (prev[key] === undefined) delete process.env[key];
+      else process.env[key] = prev[key];
+    }
+    await rm(sandbox, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('a browser env that cannot come up is a reason, never an unhandled throw', async () => {
+  const result = await inspectWebPage('https://example.com/', undefined, {
+    timeoutMs: 5000,
+    browserEnv: async () => ({ ok: false, reason: 'the capture env refused to assemble' }),
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /capture env refused to assemble/);
+});
+
+test('inspectWebPage refuses a URL without an origin before touching the browser', async () => {
+  const result = await inspectWebPage('not a url at all', undefined, { timeoutMs: 5000, browserEnv: fakeBrowserEnv() });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /absolute/);
+  assert.ok(!/score/.test(result.reason), 'no numeric verdicts, even in rejections');
+});
+
+// The listeners budget pin proves the mechanism; this one follows the chain one
+// probe further. A sub-call failing early must hand the NEXT probe the budget
+// the failure left — and once the deadline runs out mid-stream, everything after
+// degrades to named limitations with the category still ok:true. A 504 here
+// would cost the caller every other category in the same report.
+test('a consumed budget degrades the remaining probes to named limitations, never a 504', async () => {
+  // inspect answers instantly; listeners burns a scheduled ~400ms then fails;
+  // webmcp never exits, so its only way out is reaCli's own deadline.
+  const stageFixture = () => `
+    const args = process.argv.slice(2);
+    if (args.includes('inspect-web-page')) {
+      process.stdout.write(JSON.stringify(JSON.parse(${JSON.stringify(JSON.stringify(INSPECT_ENVELOPE))})) + '\\n');
+    } else if (args.includes('inspect-web-event-listeners')) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      process.stdout.write(JSON.stringify({ error: 'fixture: listeners died on schedule' }) + '\\n');
+    } else {
+      setInterval(() => {}, 1e6);
+    }
+  `;
+  await withFakeBin(stageFixture(), async () => {
+    const budget = 6000;
+    const result = await inspectWebPage('https://example.com/', undefined, {
+      timeoutMs: budget,
+      browserEnv: fakeBrowserEnv(),
+    });
+    // The category must ride out the exhausted budget: ok:true, with an
+    // explicit record of everything that was skipped, nothing thrown. THIS
+    // is the anti-504 pin.
+    assert.equal(result.ok, true, JSON.stringify(result).slice(0, 400));
+    const limits = result.inspection.limitations.join(' ');
+
+    assert.ok(limits.includes('inspect-web-event-listeners failed: fixture: listeners died on schedule'),
+      `listeners failure must be recorded as its own limitation, got: ${limits}`);
+
+    // The webmcp probe is granted what the failed listeners probe left - a
+    // fresh full allowance would read "timed out after 6000ms".
+    const granted = /discover-webmcp-tools failed: .*timed out after (\d+)ms/.exec(limits)?.[1];
+    assert.ok(granted, `expected the webmcp probe to testify its own timeout, got: ${limits}`);
+    assert.ok(Number(granted) < budget, `the webmcp probe got a fresh ${budget}ms allowance instead of the remainder`);
+    assert.ok(Number(granted) >= 4000, `the webmcp probe was left a degenerate ${granted}ms`);
+
+    // After the deadline is gone, the export is skipped by the budget gate -
+    // and the skip must say so in the verbiage, not vanish.
+    assert.equal(result.inspection.exported_scripts, null);
+    assert.ok(/script export skipped: not enough budget left \(\d+ms held\)/.test(limits),
+      `expected an explicit export skip limitation, got: ${limits}`);
+    assert.deepEqual(result.inspection.webmcp_tools, [], 'a skipped probe leaves the section empty, not raw data');
+  });
+});
+
+// The distiller holds an allow-list of copied fields (smoke pins the shape
+// statically); this test pins it behaviorally: every channel a passive
+// inspection could spill - script source text, storage values AND key names,
+// cookies, console text, DOM text, arbitrary metadata fields, and any "score"
+// field - is poisoned in the fixture, and every marker must be kept out of
+// the payload. The payload size is asserted too: a leak shows up as bulk
+// before individual marker checks would.
+test('every narrative channel of the inspection envelope is locked out of the payload', async () => {
+  const POISON_20KB = 'RETAINED_SOURCE_MARKER ' + 'x'.repeat(20480) + ' POISON_TAIL';
+  const POISONED_ENVELOPE = {
+    normalized_result: {
+      target: { target_id: 'tid', title: 'Poison Example', url: 'https://example.com/', origin: 'https://example.com' },
+      scripts: {
+        total: 1,
+        items: [{
+          script_key: 'k1', url: 'https://example.com/s.js', origin: 'https://example.com',
+          cdp_hash: 'aa11bb22', length: POISON_20KB.length, is_module: false, source_map_url: null,
+          source: { included: true, artifact: { sha256: 'aa11bb22', text: POISON_20KB } },
+          rendered_size_bytes: POISON_20KB.length,
+        }],
+      },
+      resources: [{ type: 'Script' }],
+      network: { requests: [] },
+      workers: [],
+      cookies: [{ name: 'sid', value: 'POISON_COOKIE_VALUE' }],
+      console: { events: [{ text: 'POISON_CONSOLE_TEXT secret=1' }, { text: 'second line' }] },
+      metadata: {
+        dom_urls: [{ node_index: 1, attribute: 'href', url: 'https://example.com/help', destination_scope: 'approved' }],
+        dom_nodes: [{ node_index: 2, text: 'POISON_DOM_TEXT' }],
+        page_audit_notes: 'POISON_METADATA_TEXT',
+      },
+      storage: {
+        origin: 'https://example.com', usage_bytes: 1234, quota_bytes: 9999,
+        local_storage_keys: ['layout', 'POISON_STORAGE_KEY'],
+        local_storage_values: [{ key: 'layout', value: 'POISON_STORAGE_VALUE' }],
+        cookies_storage: [{ name: 'sid', value: 'POISON_COOKIE_VALUE' }],
+        values_redacted: false,
+      },
+      score: 'POISON_GRADE',
+      normalized_partial_score: 42,
+      limitations: ['Observation starts when REA attaches; prior activity is unavailable.'],
+    },
+    confidence: 'observed',
+  };
+  await withFakeBin(webInspectFixture({ 'inspect-web-page': POISONED_ENVELOPE }), async () => {
+    const result = await inspectWebPage('https://example.com/', undefined, {
+      timeoutMs: 30000,
+      browserEnv: fakeBrowserEnv(),
+    });
+    assert.equal(result.ok, true, JSON.stringify(result).slice(0, 400));
+    const payload = JSON.stringify(result);
+
+    for (const marker of [
+      'RETAINED_SOURCE_MARKER', 'POISON_TAIL',
+      'POISON_STORAGE_VALUE', 'POISON_STORAGE_KEY',
+      'POISON_COOKIE_VALUE', 'POISON_CONSOLE_TEXT',
+      'POISON_DOM_TEXT', 'POISON_METADATA_TEXT', 'POISON_GRADE',
+    ]) {
+      assert.ok(!payload.includes(marker), `leak: "${marker}" crossed the distillation boundary — ${payload.slice(0, 300)}`);
+    }
+    assert.ok(!/"score"/.test(payload), 'no score field of any shape may appear in the payload');
+
+    // Presence evidence survives without the underlying material.
+    const wi = result.inspection;
+    assert.equal(wi.storage.has_keys, true, 'key PRESENCE is the evidence, not the material');
+    assert.deepEqual(Object.keys(wi.storage).sort(),
+      ['has_keys', 'origin', 'quota_bytes', 'usage_bytes'], 'storage ships only enumerated fields');
+    assert.equal(wi.console_events, 2, 'console is evidence as a COUNT only');
+    assert.equal(wi.scripts[0].length, POISON_20KB.length, 'byte size is evidence, bytes are not');
+
+    // A leak shows up as bulk long before a named marker check would catch:
+    // the distilled payload for one script must stay in the kilobytes.
+    assert.ok(payload.length < 6000, `payload of ${payload.length} bytes for one script smells like a leak`);
+  });
 });
