@@ -164,12 +164,11 @@ test('legacy engines: addListener fallback still reproduces the live follow', as
   );
 });
 
-// RED - pinned bug, reported to the orchestrator, deliberately not fixed here.
-// Contract: an explicit dark/light choice must beat the OS preference. The
-// anti-flash bootstrap in index.html gets this right (L19-22: `let theme = mode`,
-// only "system" consults matchMedia), but theme.js resolveTheme() early-returns
-// for "light" only and lets an explicit 'dark' fall through to the OS query.
-// On a machine with prefers-color-scheme: light, clicking Dark paints LIGHT.
+// Regression guard: an explicit dark/light choice must beat the OS preference.
+// The anti-flash bootstrap in index.html gets this right (`let theme = mode`,
+// only "system" consults matchMedia). resolveTheme() must early-return for BOTH
+// concrete modes; if dark falls through, clicking Dark on a light-OS machine
+// paints LIGHT and the default dark theme is unreachable.
 test('contract: explicit dark ignores the OS preference (resolveTheme vs bootstrap)', async () => {
   const storage = storageBean();
   await withGlobals(

@@ -1,98 +1,178 @@
 /* reascan - design tokens. Single source of truth for color, type, space, radii.
-   All colors live here; style.css never hardcodes a hex. Themes switch on
-   html[data-theme] (dark default), set pre-paint by the inline head script. */
+   Design language: deep-field telemetry. A black void substrate, one cyan signal
+   accent, one magenta hazard accent, plus a violet atmospheric wash. Every panel
+   is an angular HUD plate; nothing floats on soft shadows. Colors live only here;
+   style.css never hardcodes a theme hex. Themes switch on html[data-theme] (dark
+   default), set pre-paint by the inline head script. */
 
 :root,
 :root[data-theme='dark'] {
-  /* Vercel-grade neutrals: black base, #ededed text (never pure white). */
-  --bg: #000000;
-  --surface: #0a0a0a;
-  --elevated: #141414;
-  --bg-input: #0a0a0a;
+  /* ---- substrate: deactivated CRT, never pure #000 ---- */
+  --bg: #03050b;
+  --bg-deep: #010207;
+  --surface: rgba(6, 11, 22, 0.82);
+  --surface-solid: #060b16;
+  --surface-top: rgba(11, 20, 38, 0.92);
+  --surface-bottom: rgba(4, 8, 17, 0.94);
+  --elevated: rgba(12, 22, 40, 0.9);
+  --bg-input: rgba(3, 8, 17, 0.9);
 
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.2);
+  /* ---- hairlines: cyan signal at three strengths ---- */
+  --border: rgba(92, 214, 255, 0.16);
+  --border-strong: rgba(92, 214, 255, 0.4);
+  --border-hot: rgba(255, 70, 160, 0.45);
 
-  --text-primary: #ededed;
-  --text-secondary: #a1a1a1;
-  --text-muted: #808080; /* >=4.5 on --elevated too (thead th sits there) */
+  /* ---- text: phosphor white, telemetry blue-grey ---- */
+  --text-primary: #e9f9ff;
+  --text-secondary: #9dbdce;
+  --text-muted: #7a9caf;
 
-  /* One accent. On dark its text-level contrast needs the lifted variant:
-     #0070f3 reads 2.9:1 on near-black, #4a9fff reads 7.3:1. The raw accent
-     still paints borders/dots; text-level links use --accent-link. */
-  --accent: #0070f3;
-  --accent-link: #4a9fff;
-  --accent-soft: rgba(0, 112, 243, 0.15);
-  --accent-line: rgba(74, 159, 255, 0.4);
+  /* ---- accent 1: cyan signal ---- */
+  --accent: #22d3ee;
+  --accent-link: #7ce8f7;
+  --accent-soft: rgba(34, 211, 238, 0.1);
+  --accent-line: rgba(34, 211, 238, 0.42);
 
-  --ok: #34d399;
-  --ok-line: rgba(52, 211, 153, 0.35);
-  --ok-soft: rgba(52, 211, 153, 0.1);
-  --warn: #f0b429;
-  --warn-line: rgba(240, 180, 41, 0.35);
-  --warn-soft: rgba(240, 180, 41, 0.1);
-  --danger: #f26d6d;
-  --danger-line: rgba(242, 109, 109, 0.35);
-  --danger-soft: rgba(242, 109, 109, 0.1);
+  /* ---- accent 2: magenta hazard (REA tags, alerts, rim light) ---- */
+  --accent-2: #ff2d95;
+  --accent-2-link: #ff8bc6;
+  --accent-2-soft: rgba(255, 45, 149, 0.12);
+  --accent-2-line: rgba(255, 45, 149, 0.42);
 
-  /* 2D background palette: barely-there line work plus one soft wash, so text
-     always wins. The wash is alpha-composited, never additive. */
-  --bg2d-line: rgba(255, 255, 255, 0.06);
-  --bg2d-glow: rgba(74, 159, 255, 0.10);
+  /* ---- accent 3: violet atmosphere, never text-critical ---- */
+  --accent-3: #7c5cff;
+  --accent-3-soft: rgba(124, 92, 255, 0.14);
+  --accent-3-line: rgba(124, 92, 255, 0.38);
+
+  /* ---- status: cyan-green / amber / red, each with a soft chip fill ---- */
+  --ok: #3ef2b5;
+  --ok-line: rgba(62, 242, 181, 0.38);
+  --ok-soft: rgba(62, 242, 181, 0.1);
+  --warn: #ffc857;
+  --warn-line: rgba(255, 200, 87, 0.38);
+  --warn-soft: rgba(255, 200, 87, 0.1);
+  --danger: #ff5c7a;
+  --danger-line: rgba(255, 92, 122, 0.4);
+  --danger-soft: rgba(255, 92, 122, 0.12);
+
+  /* ---- background scene: Canvas 2D + CSS fallback ---- */
+  --bg2d-line: rgba(92, 214, 255, 0.14);
+  --bg2d-glow: rgba(34, 211, 238, 0.1);
+  --bg2d-star: rgba(198, 246, 255, 0.9);
+  --bg2d-ring: rgba(255, 45, 149, 0.2);
+  --bg2d-horizon: rgba(34, 211, 238, 0.22);
+
+  /* ---- atmosphere painted behind the canvas and on the CRT overlay ---- */
+  --nebula-a: rgba(34, 211, 238, 0.13);
+  --nebula-b: rgba(255, 45, 149, 0.09);
+  --nebula-c: rgba(124, 92, 255, 0.12);
+  --scanline: rgba(130, 230, 255, 0.045);
+  --vignette: rgba(0, 0, 0, 0.6);
 
   /* sticky header over the canvas needs translucency */
-  --header-bg: rgba(0, 0, 0, 0.72);
+  --header-bg: rgba(3, 6, 14, 0.66);
+  --header-blur: blur(18px) saturate(135%);
 
-  --shadow-panel: none;
+  /* depth: one inner highlight plus an atmospheric rim, no grey drop shadow */
+  --shadow-panel: 0 40px 90px -60px rgba(34, 211, 238, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --shadow-float: 0 34px 70px -38px rgba(34, 211, 238, 0.4), 0 18px 46px -30px rgba(255, 45, 149, 0.3);
+  --glow-cyan: 0 0 24px rgba(34, 211, 238, 0.35);
+  --glow-magenta: 0 0 24px rgba(255, 45, 149, 0.3);
+  --focus-ring: #7ce8f7;
+  --selection-bg: rgba(34, 211, 238, 0.28);
 
-  --focus-ring: #4a9fff;
+  /* Theme-specific component tokens: keep style.css free of one-off hexes. */
+  --display-grad: linear-gradient(100deg, var(--text-primary) 0%, #d8faff 42%, var(--accent) 92%);
+  --control-border: rgba(92, 214, 255, 0.5);
+  --inset-shadow: inset 0 0 24px rgba(0, 0, 0, 0.28);
+  --btn-primary-bg: linear-gradient(118deg, var(--accent) 0%, #9df3ff 58%, #4dd8ef 100%);
+  --btn-primary-fg: #021018;
+  --btn-primary-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 :root[data-theme='light'] {
-  --bg: #ffffff;
-  --surface: #fafafa;
-  --elevated: #f5f5f5;
-  --bg-input: #ffffff;
+  /* ---- daylight HUD: pale instrument glass, ink-blue text, same geometry ---- */
+  --bg: #e9f1f5;
+  --bg-deep: #dbe8ee;
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-solid: #f8fbfd;
+  --surface-top: rgba(255, 255, 255, 0.92);
+  --surface-bottom: rgba(238, 246, 250, 0.94);
+  --elevated: rgba(224, 237, 244, 0.95);
+  --bg-input: #f9fcfe;
 
-  --border: #eaeaea;
-  --border-strong: #d4d4d4;
+  --border: rgba(8, 78, 104, 0.18);
+  --border-strong: rgba(8, 78, 104, 0.4);
+  --border-hot: rgba(170, 0, 80, 0.4);
 
-  --text-primary: #171717;
-  --text-secondary: #666666;
-  --text-muted: #666666;
+  --text-primary: #07151e;
+  --text-secondary: #34525f;
+  --text-muted: #4d6b78;
 
-  --accent: #0070f3;
-  --accent-link: #0068f3; /* text-level accent: >=4.5 on bg#fff, surface#fafafa, elevated#f5f5f5 */
-  --accent-soft: rgba(0, 112, 243, 0.1);
-  --accent-line: rgba(0, 112, 243, 0.4);
+  --accent: #007f9e;
+  --accent-link: #006c86;
+  --accent-soft: rgba(0, 127, 158, 0.1);
+  --accent-line: rgba(0, 127, 158, 0.4);
 
-  /* Text-level status colors for light surfaces: each keeps >=4.5:1 on its soft chip. */
-  --ok: #067647;
-  --ok-line: rgba(6, 118, 71, 0.35);
-  --ok-soft: rgba(6, 118, 71, 0.08);
-  --warn: #a15b00; /* >=4.5 on --warn-soft composited over --surface */
-  --warn-line: rgba(161, 92, 0, 0.35);
-  --warn-soft: rgba(161, 92, 0, 0.08);
-  --danger: #c0392b;
-  --danger-line: rgba(192, 57, 43, 0.35);
-  --danger-soft: rgba(192, 57, 43, 0.08);
+  --accent-2: #b8005e;
+  --accent-2-link: #a10052;
+  --accent-2-soft: rgba(184, 0, 94, 0.09);
+  --accent-2-line: rgba(184, 0, 94, 0.38);
 
-  --bg2d-line: rgba(0, 0, 0, 0.05);
-  --bg2d-glow: rgba(0, 104, 243, 0.07);
+  --accent-3: #5a3fd6;
+  --accent-3-soft: rgba(90, 63, 214, 0.09);
+  --accent-3-line: rgba(90, 63, 214, 0.32);
 
-  --header-bg: rgba(255, 255, 255, 0.72);
+  --ok: #04654a;
+  --ok-line: rgba(4, 101, 74, 0.35);
+  --ok-soft: rgba(4, 101, 74, 0.08);
+  --warn: #8a5a00;
+  --warn-line: rgba(138, 90, 0, 0.35);
+  --warn-soft: rgba(138, 90, 0, 0.08);
+  --danger: #b3123d;
+  --danger-line: rgba(179, 18, 61, 0.35);
+  --danger-soft: rgba(179, 18, 61, 0.08);
 
-  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --bg2d-line: rgba(0, 86, 112, 0.12);
+  --bg2d-glow: rgba(0, 132, 164, 0.1);
+  --bg2d-star: rgba(12, 64, 86, 0.55);
+  --bg2d-ring: rgba(184, 0, 94, 0.16);
+  --bg2d-horizon: rgba(0, 127, 158, 0.12);
 
-  --focus-ring: #0070f3;
+  --nebula-a: rgba(0, 127, 158, 0.1);
+  --nebula-b: rgba(184, 0, 94, 0.06);
+  --nebula-c: rgba(90, 63, 214, 0.08);
+  --scanline: rgba(0, 80, 105, 0.035);
+  --vignette: rgba(28, 60, 72, 0.1);
+
+  --header-bg: rgba(233, 241, 245, 0.74);
+  --header-blur: blur(18px) saturate(120%);
+
+  --shadow-panel: 0 30px 70px -50px rgba(0, 70, 95, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --shadow-float: 0 30px 60px -40px rgba(0, 70, 95, 0.35);
+  --glow-cyan: 0 0 18px rgba(0, 127, 158, 0.22);
+  --glow-magenta: 0 0 18px rgba(184, 0, 94, 0.18);
+  --focus-ring: #006c86;
+  --selection-bg: rgba(0, 127, 158, 0.2);
+
+  /* Light-mode component tokens: dark ink ramp, strong control edges, and a
+     primary plate that separates from the pale background. */
+  --display-grad: linear-gradient(100deg, #07151e 0%, #0e6b85 42%, #00566b 92%);
+  --control-border: rgba(8, 78, 104, 0.62);
+  --inset-shadow: inset 0 0 24px rgba(8, 60, 80, 0.05);
+  --btn-primary-bg: linear-gradient(118deg, #006a83 0%, #00738c 100%);
+  --btn-primary-fg: #eafaff;
+  --btn-primary-shadow: none;
 }
 
 /* ---- typography + shared structure tokens ---- */
 
 :root {
-  --font-display: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Orbitron carries the HUD; Geist keeps long copy readable; JetBrains Mono
+     owns every number, label and coordinate. */
+  --font-display: 'Orbitron', 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-mono: 'JetBrains Mono', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* 1.25 type scale */
   --text-xs: 0.8125rem;   /* 13px */
@@ -103,7 +183,7 @@
   --text-2xl: 1.5625rem;  /* 25px */
   --text-3xl: 1.9375rem;  /* 31px */
   --text-4xl: 2.4375rem;  /* 39px */
-  --text-5xl: 3.0625rem;  /* 49px */
+  --text-5xl: 3.5rem;     /* 56px */
 
   /* ---- spacing: 8px grid ---- */
   --space-1: 8px;
@@ -117,16 +197,24 @@
   --space-16: 128px;
 
   /* ---- layout ---- */
-  --max-width: 1200px;
-  --content-width: 880px;
+  --max-width: 1240px;
+  --content-width: 980px;
 
-  /* ---- radii: control 6, card 10 ---- */
-  --radius-card: 10px;
-  --radius-control: 6px;
+  /* ---- geometry: angular plates, not pills ---- */
+  --radius-card: 3px;
+  --radius-control: 2px;
   --radius-pill: 999px;
+  --cut: 18px;
+  --cut-sm: 10px;
 
   /* ---- motion ---- */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-fluid: cubic-bezier(0.32, 0.72, 0, 1);
   --duration-fast: 150ms;
-  --duration-base: 250ms;
+  --duration-base: 280ms;
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--text-primary);
 }

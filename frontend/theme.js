@@ -25,9 +25,9 @@ function storedMode() {
 
 // Resolves any mode to the concrete theme painted on <html>. "Unknown" and
 // "system" fall through to the OS preference; "light" and "dark" are explicit
-// choices and must ignore it entirely - otherwise explicit Dark flips to light
-// on an OS set to light. A missing matchMedia reads as dark, which keeps the
-// module usable in minimal DOM shims.
+// choices and must ignore it entirely - otherwise the default dark theme paints
+// light on a machine whose OS prefers light. A missing matchMedia reads as dark,
+// which keeps the module usable in minimal DOM shims.
 function resolveTheme(mode) {
   if (mode === 'light') return 'light';
   if (mode === 'dark') return 'dark';

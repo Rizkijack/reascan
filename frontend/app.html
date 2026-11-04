@@ -26,13 +26,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700;800;900&display=swap"
     rel="stylesheet"
   />
   <link rel="stylesheet" href="tokens.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <div class="hud-frame" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
   <canvas id="bg2d" aria-hidden="true"></canvas>
   <header class="site-header">
     <div class="container header-inner">
@@ -61,9 +62,9 @@
           <p class="eyebrow rise">The analyzer</p>
           <h1 id="app-heading" class="rise">Run an analysis.</h1>
           <p class="lede rise">
-            Paste a target URL, pick the categories, and the report renders on
-            this page: verdict, evidence rows, explicit limitations and unknowns.
-            A run takes up to about 70 seconds.
+            Paste a target URL, pick categories, and read the report here:
+            verdict, evidence rows, limitations, unknowns. A run takes about
+            70 seconds.
           </p>
         </div>
       </div>
@@ -139,12 +140,17 @@
     // Gentle fade/slide-in on scroll. Respects prefers-reduced-motion.
     (() => {
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const targets = document.querySelectorAll('.reveal');
+      if (!('IntersectionObserver' in window)) {
+        targets.forEach((el) => el.classList.add('is-visible'));
+        return;
+      }
       const io = new IntersectionObserver((entries) => {
         for (const e of entries) {
           if (e.isIntersecting) { e.target.classList.add('is-visible'); io.unobserve(e.target); }
         }
       }, { threshold: 0.08 });
-      document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+      targets.forEach((el) => io.observe(el));
     })();
   </script>
 </body>

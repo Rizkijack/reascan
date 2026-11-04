@@ -48,12 +48,14 @@ function env({ dpr = 1, reduced = false, ctx = null, contextThrows = false, with
   win.addEventListener = (type) => { win.addEventListenerCalls.push(type); };
   const rafQueue = [];
   const idleCbs = [];
+  const cancelled = [];
   const real = {
     document: globalThis.document,
     window: globalThis.window,
     localStorage: globalThis.localStorage,
     getComputedStyle: globalThis.getComputedStyle,
     requestAnimationFrame: globalThis.requestAnimationFrame,
+    cancelAnimationFrame: globalThis.cancelAnimationFrame,
     requestIdleCallback: globalThis.requestIdleCallback,
     setTimeout: globalThis.setTimeout,
   };
@@ -61,15 +63,18 @@ function env({ dpr = 1, reduced = false, ctx = null, contextThrows = false, with
   globalThis.window = win;
   globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
   globalThis.requestAnimationFrame = (cb) => { rafQueue.push(cb); return rafQueue.length; };
+  globalThis.cancelAnimationFrame = (id) => { cancelled.push(id); };
   globalThis.requestIdleCallback = (cb) => { idleCbs.push(cb); return idleCbs.length; };
   globalThis.setTimeout = () => { throw new Error('setTimeout must not be reached when requestIdleCallback exists'); };
   return {
-    doc, win, canvas, docEl, getContextCalls, rafQueue, idleCbs,
+    doc, win, canvas, docEl, getContextCalls, rafQueue, idleCbs, cancelled,
     cleanup() {
       globalThis.document = real.document;
       globalThis.window = real.window;
       globalThis.getComputedStyle = real.getComputedStyle;
       globalThis.requestAnimationFrame = real.requestAnimationFrame;
+      if (real.cancelAnimationFrame === undefined) delete globalThis.cancelAnimationFrame;
+      else globalThis.cancelAnimationFrame = real.cancelAnimationFrame;
       globalThis.requestIdleCallback = real.requestIdleCallback;
       globalThis.setTimeout = real.setTimeout;
       if (real.localStorage === undefined) delete globalThis.localStorage;
@@ -151,10 +156,10 @@ test('mocked run: idempotent mount, DPR capped at 1.5, loop pauses and resumes o
     env1.idleCbs[0]();
     assert.equal(env1.rafQueue.length, 1);
 
-    // one tick (running) draws and re-schedules: two grid layers per frame
+    // one tick (running) draws and re-schedules: globe + floor are the two strokes
     env1.rafQueue.shift()(16);
     assert.equal(env1.rafQueue.length, 1);
-    assert.equal(ctx.calls.strokes, 2, 'both grid layers are stroked each frame');
+    assert.equal(ctx.calls.strokes, 2, 'the globe and the floor are stroked each frame');
 
     // pause: mark hidden, the pending frame still fires once, then stops
     env1.doc.hidden = true;
@@ -190,5 +195,29 @@ test('the centre pass punches through with destination-out, never an additive bl
     assert.ok(composites.includes('destination-out'), 'the centre pass must erase, not lighten');
     assert.ok(!composites.includes('lighter'), 'additive blending would blow out the light theme');
     assert.equal(ctx._composite, 'source-over', 'the pass restores source-over before returning');
+  } finally { env1.cleanup(); }
+});
+
+test('a mid-frame throw is terminal and hands over to the static grid', async () => {
+  const ctx = mockCtx();
+  ctx.stroke = () => { throw new Error('canvas driver died'); };
+  const env1 = env({ ctx });
+  try {
+    const { startBG2D } = await mod();
+    assert.equal(startBG2D(), true);
+    env1.doc.hidden = false;
+    env1.idleCbs[0]();
+    env1.rafQueue.shift()(16); // globe stroke throws -> catch -> fallback
+
+    assert.equal(env1.docEl.dataset.bg2d, 'css-fallback');
+    assert.equal(env1.win.__reascanBG2D__status, 'css-fallback');
+    assert.equal(env1.rafQueue.length, 0, 'a failed scene must not schedule another frame');
+    assert.ok(env1.cancelled.length > 0, 'the pending frame must be cancelled');
+
+    // a later visibility toggle must not resurrect the broken loop
+    env1.doc.hidden = false;
+    for (const fn of [...env1.doc._listeners.visibilitychange ?? []]) fn();
+    assert.equal(env1.rafQueue.length, 0, 'the fallback is terminal, not a pause');
+    assert.equal(startBG2D(), false, 'a failed mount never reports itself as running');
   } finally { env1.cleanup(); }
 });
