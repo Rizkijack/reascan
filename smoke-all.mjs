@@ -15,7 +15,7 @@
 //
 // Run: node smoke-all.mjs
 
-import { readFileSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -911,6 +911,30 @@ group('app.js in a DOM shim (the feature with no unit coverage)');
   check('both footers carry the site name', footerNamed(html) && footerNamed(app));
   check('the tunnel vendor is not typoed (Consoleflare regression)', !/Consoleflare/.test(html + app));
   check('no em-dash anywhere in the shipped pages', !/[\u2013\u2014]/.test(html + app));
+}
+
+group('soundtrack contract (original, generated, opt-in)');
+{
+  // The soundtrack is synthesised at runtime from oscillator nodes. That is the
+  // whole reason it can call itself copyright-free: there is no recording in
+  // the repo and no third-party request at play time. These checks pin that
+  // property, not the sound design.
+  const audio = readFileSync('frontend/audio.js', 'utf8');
+  const shippedPages = `${readFileSync('frontend/index.html', 'utf8')}\n${readFileSync('frontend/app.html', 'utf8')}`;
+
+  const audioAssets = ['frontend', 'DOCUMENT'].flatMap((dir) => {
+    try { return readdirSync(dir, { recursive: true }).map(String); } catch { return []; }
+  }).filter((name) => /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(name));
+  check('no audio file is shipped: the music is generated, so nothing to license', audioAssets.length === 0, audioAssets.join(','));
+  check('no <audio> element and no autoplay in either page', !/<audio[\s>]/i.test(shippedPages) && !/\bautoplay\b/i.test(shippedPages));
+  check('the soundtrack module makes no outbound request of its own', !/(^|[^A-Za-z])fetch\(/.test(audio) && !/XMLHttpRequest/.test(audio) && !/https?:\/\//.test(audio));
+  check('both pages ship the module and the control, off by default',
+    (shippedPages.match(/src="audio\.js"/g) ?? []).length === 2
+      && (shippedPages.match(/id="sound-toggle"/g) ?? []).length === 2
+      && /id="sound-toggle"[\s\S]{0,220}aria-pressed="false"/.test(shippedPages));
+  check('the control is a real button with a state label', /<button[^>]*id="sound-toggle"[\s\S]{0,400}aria-pressed="false"/.test(shippedPages));
+  // Stop must be honoured off-screen too: a hidden tab must not keep playing.
+  check('the soundtrack suspends when the tab is hidden', /visibilitychange/.test(audio) && /suspend/.test(audio));
 }
 
 // ================================================================ STEP 7
